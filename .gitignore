@@ -9,3 +9,6 @@ venv/
 # system files
 .DS_Store
 Thumbs.db
+
+# SQLite database file (generated at runtime)
+*.db
