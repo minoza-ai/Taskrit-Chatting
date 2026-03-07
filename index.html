@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Taskrit 1대1 채팅</title>
+  <title>Taskrit Chatting</title>
   <style>
     body {
       margin: 0;
@@ -42,7 +42,7 @@
       background: #fafafa;
     }
 
-    h2 {
+    h2, h3 {
       margin-top: 0;
     }
 
@@ -85,13 +85,13 @@
       gap: 10px;
     }
 
-    .user-name {
+    .user-id {
       font-weight: bold;
       flex: 1;
     }
 
     .user-card button {
-      width: 140px;
+      width: 160px;
       margin-top: 0;
       flex-shrink: 0;
     }
@@ -106,6 +106,8 @@
       background: white;
       border: 1px dashed #ccc;
       border-radius: 10px;
+      text-align: center;
+      padding: 20px;
     }
 
     .chat-area {
@@ -120,8 +122,17 @@
       border-radius: 8px;
       padding: 15px;
       margin-bottom: 15px;
-      font-size: 18px;
+    }
+
+    .room-title {
+      font-size: 20px;
       font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .room-info {
+      font-size: 14px;
+      color: #555;
     }
 
     .messages-box {
@@ -186,6 +197,43 @@
       color: #555;
     }
 
+    .room-create-box {
+      margin-top: 15px;
+      padding: 12px;
+      background: #eef4ff;
+      border: 1px solid #cfe0ff;
+      border-radius: 8px;
+    }
+
+    .my-room-list {
+      margin-top: 20px;
+      padding-top: 15px;
+      border-top: 1px solid #ddd;
+    }
+
+    .room-list-item {
+      background: #f7f7f7;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 10px;
+      cursor: pointer;
+    }
+
+    .room-list-item:hover {
+      background: #eef4ff;
+    }
+
+    .room-list-title {
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .room-list-meta {
+      font-size: 12px;
+      color: #666;
+    }
+
     @media (max-width: 900px) {
       .container {
         flex-direction: column;
@@ -203,31 +251,47 @@
   </style>
 </head>
 <body>
-  <div class="topbar">Taskrit 1대1 채팅</div>
+  <div class="topbar">Taskrit Chatting</div>
 
   <div class="container">
-    <!-- 왼쪽 -->
+    <!-- 왼쪽 패널 -->
     <div class="left-panel">
       <h2>사용자 목록</h2>
 
-      <label for="myId">내 아이디</label>
-      <input type="text" id="myId" placeholder="예: me" />
+      <label for="myId">내 사용자 ID</label>
+      <input type="text" id="myId" placeholder="예: user_001" oninput="loadMyRooms()" />
+
+      <div class="room-create-box">
+        <label for="roomNameInput">새 채팅방 이름</label>
+        <input type="text" id="roomNameInput" placeholder="예: 개인 문의방" />
+      </div>
 
       <div id="userList" style="margin-top:20px;"></div>
+
+      <div class="my-room-list">
+        <h3>내 채팅방 목록</h3>
+        <div id="myRoomList">내 사용자 ID를 입력하면 채팅방 목록이 표시됩니다.</div>
+      </div>
     </div>
 
-    <!-- 오른쪽 -->
+    <!-- 오른쪽 패널 -->
     <div class="right-panel">
       <!-- 처음에는 빈 화면 -->
       <div id="emptyChat" class="empty-chat">
-        왼쪽에서 1대1 채팅방을 선택해주세요
+        왼쪽에서 사용자와 채팅방을 만들거나<br />
+        내 채팅방 목록에서 채팅방을 선택해주세요
       </div>
 
-      <!-- 버튼 누른 뒤에만 보이는 채팅창 -->
+      <!-- 버튼 누른 뒤에만 보이는 채팅 화면 -->
       <div id="chatArea" class="chat-area">
-        <div class="chat-header" id="chatHeader"></div>
+        <div class="chat-header">
+          <div class="room-title" id="chatRoomTitle"></div>
+          <div class="room-info" id="chatRoomInfo"></div>
+        </div>
 
-        <div class="messages-box" id="messagesBox"></div>
+        <div class="messages-box" id="messagesBox">
+          메시지가 여기에 표시됩니다.
+        </div>
 
         <div class="input-row">
           <textarea id="messageText" placeholder="메시지를 입력하세요"></textarea>
@@ -241,8 +305,12 @@
 
   <script>
     let currentRoomId = null;
-    let currentOtherUser = null;
+    let currentRoomName = null;
+    let autoRefreshTimer = null;
 
+    // -----------------------------------
+    // 사용자 목록 불러오기
+    // -----------------------------------
     async function loadUsers() {
       const userList = document.getElementById("userList");
       userList.innerHTML = "";
@@ -251,11 +319,11 @@
         const response = await fetch("/users");
         const users = await response.json();
 
-        users.forEach(user => {
+        users.forEach(userId => {
           userList.innerHTML += `
             <div class="user-card">
-              <div class="user-name">사용자 ${user}</div>
-              <button onclick="createRoomWith('${user}')">1대1 채팅하기</button>
+              <div class="user-id">${userId}</div>
+              <button onclick="createDMRoom('${userId}')">1대1 채팅방 만들기</button>
             </div>
           `;
         });
@@ -265,17 +333,67 @@
       }
     }
 
-    async function createRoomWith(otherUser) {
+    // -----------------------------------
+    // 내 채팅방 목록 불러오기
+    // -----------------------------------
+    async function loadMyRooms() {
       const myId = document.getElementById("myId").value.trim();
-      const statusText = document.getElementById("statusText");
+      const myRoomList = document.getElementById("myRoomList");
 
       if (!myId) {
-        alert("먼저 내 아이디를 입력해주세요.");
+        myRoomList.innerHTML = "내 사용자 ID를 입력하면 채팅방 목록이 표시됩니다.";
         return;
       }
 
-      if (myId === otherUser) {
-        alert("자기 자신과는 채팅할 수 없습니다.");
+      try {
+        const response = await fetch(`/users/${myId}/rooms`);
+        const data = await response.json();
+
+        if (data.error) {
+          myRoomList.innerHTML = data.error;
+          return;
+        }
+
+        if (data.length === 0) {
+          myRoomList.innerHTML = "참여 중인 채팅방이 없습니다.";
+          return;
+        }
+
+        myRoomList.innerHTML = "";
+
+        data.forEach(room => {
+          myRoomList.innerHTML += `
+            <div class="room-list-item" onclick='openRoomFromList(${JSON.stringify(room).replace(/'/g, "&apos;")})'>
+              <div class="room-list-title">${room.room_name}</div>
+              <div class="room-list-meta">타입: ${room.room_type} / room_id: ${room.room_id}</div>
+            </div>
+          `;
+        });
+      } catch (error) {
+        myRoomList.innerHTML = "채팅방 목록을 불러오지 못했습니다.";
+        console.error(error);
+      }
+    }
+
+    // -----------------------------------
+    // 1대1 채팅방 생성
+    // -----------------------------------
+    async function createDMRoom(otherUserId) {
+      const myId = document.getElementById("myId").value.trim();
+      const roomName = document.getElementById("roomNameInput").value.trim();
+
+      if (!myId) {
+        alert("먼저 내 사용자 ID를 입력해주세요.");
+        return;
+      }
+
+      if (!roomName) {
+        alert("채팅방 이름을 입력해주세요.");
+        return;
+      }
+
+      if (myId === otherUserId) {
+        alert("자기 자신과는 1대1 채팅방을 만들 수 없습니다.");
         return;
       }
 
@@ -286,38 +404,61 @@
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
+            room_name: roomName,
             user1_id: myId,
-            user2_id: otherUser
+            user2_id: otherUserId
           })
         });
 
         const data = await response.json();
 
         if (data.error) {
-          statusText.textContent = data.error;
+          alert(data.error);
           return;
         }
 
         currentRoomId = data.room_id;
-        currentOtherUser = otherUser;
+        currentRoomName = data.room_name;
 
-        // 버튼 누르기 전에는 빈 화면
-        // 버튼 누르면 채팅창 보이게 변경
-        document.getElementById("emptyChat").style.display = "none";
-        document.getElementById("chatArea").style.display = "flex";
-
-        document.getElementById("chatHeader").innerText = `${otherUser} 와의 1대1 채팅방`;
-
-        document.getElementById("messagesBox").innerHTML = "";
-        document.getElementById("statusText").textContent = `${otherUser}님과의 채팅방이 생성되었습니다.`;
-
+        openChatArea(data);
         loadMessages();
+        loadMyRooms();
       } catch (error) {
         console.error(error);
-        document.getElementById("statusText").textContent = "채팅방 생성 실패";
+        alert("1대1 채팅방 생성에 실패했습니다.");
       }
     }
 
+    // -----------------------------------
+    // 채팅방 목록에서 방 열기
+    // -----------------------------------
+    function openRoomFromList(room) {
+      currentRoomId = room.room_id;
+      currentRoomName = room.room_name;
+
+      openChatArea(room);
+      loadMessages();
+    }
+
+    // -----------------------------------
+    // 오른쪽 채팅창 열기
+    // -----------------------------------
+    function openChatArea(room) {
+      document.getElementById("emptyChat").style.display = "none";
+      document.getElementById("chatArea").style.display = "flex";
+
+      document.getElementById("chatRoomTitle").innerText = room.room_name;
+      document.getElementById("chatRoomInfo").innerText =
+        `room_id: ${room.room_id} / type: ${room.room_type} / members: ${room.members.join(", ")}`;
+
+      document.getElementById("statusText").textContent = "채팅방이 열렸습니다.";
+
+      startAutoRefresh();
+    }
+
+    // -----------------------------------
+    // 메시지 보내기
+    // -----------------------------------
     async function sendMessage() {
       const myId = document.getElementById("myId").value.trim();
       const text = document.getElementById("messageText").value.trim();
@@ -329,7 +470,7 @@
       }
 
       if (!myId) {
-        alert("내 아이디를 입력해주세요.");
+        alert("내 사용자 ID를 입력해주세요.");
         return;
       }
 
@@ -359,7 +500,6 @@
 
         document.getElementById("messageText").value = "";
         statusText.textContent = "메시지 전송 완료";
-
         loadMessages();
       } catch (error) {
         console.error(error);
@@ -367,6 +507,9 @@
       }
     }
 
+    // -----------------------------------
+    // 메시지 불러오기
+    // -----------------------------------
     async function loadMessages() {
       const myId = document.getElementById("myId").value.trim();
       const messagesBox = document.getElementById("messagesBox");
@@ -404,13 +547,32 @@
           `;
         });
 
-        statusText.textContent = "메시지 불러오기 완료";
+        messagesBox.scrollTop = messagesBox.scrollHeight;
+        statusText.textContent = "메시지 자동 갱신 완료";
       } catch (error) {
         console.error(error);
         statusText.textContent = "메시지 불러오기 실패";
       }
     }
 
+    // -----------------------------------
+    // 자동 새로고침 시작
+    // -----------------------------------
+    function startAutoRefresh() {
+      if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+      }
+
+      autoRefreshTimer = setInterval(() => {
+        if (currentRoomId) {
+          loadMessages();
+        }
+      }, 2000);
+    }
+
+    // -----------------------------------
+    // 최초 실행
+    // -----------------------------------
     loadUsers();
   </script>
 </body>
