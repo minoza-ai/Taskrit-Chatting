@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict, List, Optional
@@ -413,7 +413,7 @@ def delete_message(message_id: str, body: DeleteMessageRequest):
 @app.post("/rooms/{room_id}/files")
 def upload_file_to_room(
     room_id: str,
-    sender_uuid: str,
+    sender_uuid: str = Form(...),
     file: UploadFile = File(...)
 ):
     if not room_exists(room_id):
