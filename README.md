@@ -264,13 +264,3 @@ Taskrit-Chatting
 
 ---
 
-# Project Role
-
-Taskrit 프로젝트에서 각 서비스는 다음 역할을 담당합니다.
-
-```
-Taskrit-backend   → 사용자 / 인증 / JWT
-Taskrit-teaming   → 팀 매칭 / 임베딩
-Taskrit-chatting  → 채팅 서비스
-Taskrit-frontend  → 사용자 인터페이스
-```
