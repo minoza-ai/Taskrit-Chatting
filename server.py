@@ -1,11 +1,16 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Dict, List, Optional
+from typing import List, Optional
 from datetime import datetime
+from pymongo import MongoClient
+from pymongo.collection import Collection
+from dotenv import load_dotenv
 import uuid
 import os
 import shutil
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -16,51 +21,16 @@ app = FastAPI()
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# =====================================
-# 메모리 저장소
-# =====================================
-# 현재는 MVP용으로 메모리에 저장합니다.
-# 나중에는 MongoDB로 바꾸면 됩니다.
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_DB = os.getenv("MONGODB_DB", "chat_app")
 
-users = [
-    {
-        "user_uuid": "550e8400-e29b-41d4-a716-446655440000",
-        "user_id": "john_doe",
-        "nickname": "John"
-    },
-    {
-        "user_uuid": "660e8400-e29b-41d4-a716-446655440111",
-        "user_id": "alice_01",
-        "nickname": "Alice"
-    },
-    {
-        "user_uuid": "770e8400-e29b-41d4-a716-446655440222",
-        "user_id": "bob_02",
-        "nickname": "Bob"
-    },
-    {
-        "user_uuid": "880e8400-e29b-41d4-a716-446655440333",
-        "user_id": "charlie_03",
-        "nickname": "Charlie"
-    }
-]
+client = MongoClient(MONGODB_URI)
+db = client[MONGODB_DB]
 
-# 채팅방 저장
-# key = room_id
-rooms: Dict[str, Dict] = {}
-
-# 메시지 저장
-# key = room_id, value = 메시지 리스트
-messages: Dict[str, List[Dict]] = {}
-
-# 읽음 상태 저장
-# key = room_id
-# value = { user_uuid: last_read_message_id }
-read_status: Dict[str, Dict[str, str]] = {}
-
-# 채팅방별 메시지 순번 저장
-# key = room_id, value = 마지막 메시지 번호
-room_message_seq: Dict[str, int] = {}
+users_collection: Collection = db["users"]
+rooms_collection: Collection = db["rooms"]
+messages_collection: Collection = db["messages"]
+read_status_collection: Collection = db["read_status"]
 
 # =====================================
 # 요청 형식
@@ -109,27 +79,95 @@ def make_dm_key(a: str, b: str) -> str:
     return "|".join(sorted([a, b]))
 
 
+def serialize_doc(doc: Optional[dict]) -> Optional[dict]:
+    if doc is None:
+        return None
+    doc.pop("_id", None)
+    return doc
+
+
+def serialize_docs(docs: List[dict]) -> List[dict]:
+    result = []
+    for doc in docs:
+        doc.pop("_id", None)
+        result.append(doc)
+    return result
+
+
 def find_user_by_uuid(user_uuid: str):
-    for user in users:
-        if user["user_uuid"] == user_uuid:
-            return user
-    return None
+    return serialize_doc(users_collection.find_one({"user_uuid": user_uuid}))
 
 
 def user_exists(user_uuid: str) -> bool:
-    return find_user_by_uuid(user_uuid) is not None
+    return users_collection.find_one({"user_uuid": user_uuid}, {"_id": 1}) is not None
 
 
 def room_exists(room_id: str) -> bool:
-    return room_id in rooms
+    return rooms_collection.find_one({"room_id": room_id}, {"_id": 1}) is not None
+
+
+def get_room(room_id: str):
+    return serialize_doc(rooms_collection.find_one({"room_id": room_id}))
 
 
 def find_message_by_id(message_id: str):
-    for room_id, room_messages in messages.items():
-        for msg in room_messages:
-            if msg["message_id"] == message_id:
-                return msg, room_id
-    return None, None
+    msg = messages_collection.find_one({"message_id": message_id})
+    if not msg:
+        return None, None
+    room_id = msg["room_id"]
+    return serialize_doc(msg), room_id
+
+
+def get_next_seq(room_id: str) -> int:
+    last_msg = messages_collection.find_one(
+        {"room_id": room_id},
+        sort=[("seq", -1)]
+    )
+    return 1 if not last_msg else last_msg["seq"] + 1
+
+
+def seed_users():
+    seed_data = [
+        {
+            "user_uuid": "550e8400-e29b-41d4-a716-446655440000",
+            "user_id": "john_doe",
+            "nickname": "John"
+        },
+        {
+            "user_uuid": "660e8400-e29b-41d4-a716-446655440111",
+            "user_id": "alice_01",
+            "nickname": "Alice"
+        },
+        {
+            "user_uuid": "770e8400-e29b-41d4-a716-446655440222",
+            "user_id": "bob_02",
+            "nickname": "Bob"
+        },
+        {
+            "user_uuid": "880e8400-e29b-41d4-a716-446655440333",
+            "user_id": "charlie_03",
+            "nickname": "Charlie"
+        }
+    ]
+
+    for user in seed_data:
+        if not users_collection.find_one({"user_uuid": user["user_uuid"]}):
+            users_collection.insert_one(user)
+
+
+def create_indexes():
+    users_collection.create_index("user_uuid", unique=True)
+    rooms_collection.create_index("room_id", unique=True)
+    rooms_collection.create_index("dm_key")
+    messages_collection.create_index("message_id", unique=True)
+    messages_collection.create_index([("room_id", 1), ("seq", 1)])
+    read_status_collection.create_index([("room_id", 1), ("user_uuid", 1)], unique=True)
+
+
+@app.on_event("startup")
+def startup_event():
+    create_indexes()
+    seed_users()
 
 # =====================================
 # 메인 페이지
@@ -145,6 +183,7 @@ def read_index():
 
 @app.get("/users")
 def get_users():
+    users = list(users_collection.find({}, {"_id": 0}))
     return users
 
 # =====================================
@@ -155,23 +194,25 @@ def get_users():
 @app.post("/dm/rooms")
 def create_dm_room(body: CreateDMRoomRequest):
     if not body.room_name.strip():
-        return {"error": "room_name은 비어 있을 수 없습니다."}
+        raise HTTPException(status_code=400, detail="room_name은 비어 있을 수 없습니다.")
 
     if body.user1_uuid == body.user2_uuid:
-        return {"error": "자기 자신과는 1대1 채팅방을 만들 수 없습니다."}
+        raise HTTPException(status_code=400, detail="자기 자신과는 1대1 채팅방을 만들 수 없습니다.")
 
     if not user_exists(body.user1_uuid):
-        return {"error": f"{body.user1_uuid} 사용자가 존재하지 않습니다."}
+        raise HTTPException(status_code=404, detail=f"{body.user1_uuid} 사용자가 존재하지 않습니다.")
 
     if not user_exists(body.user2_uuid):
-        return {"error": f"{body.user2_uuid} 사용자가 존재하지 않습니다."}
+        raise HTTPException(status_code=404, detail=f"{body.user2_uuid} 사용자가 존재하지 않습니다.")
 
     dm_key = make_dm_key(body.user1_uuid, body.user2_uuid)
 
-    # 같은 두 사용자 간 DM 방이 이미 있으면 기존 방 반환
-    for room in rooms.values():
-        if room["room_type"] == "dm" and room.get("dm_key") == dm_key:
-            return room
+    existing_room = rooms_collection.find_one(
+        {"room_type": "dm", "dm_key": dm_key},
+        {"_id": 0}
+    )
+    if existing_room:
+        return existing_room
 
     room_id = str(uuid.uuid4())
 
@@ -185,11 +226,7 @@ def create_dm_room(body: CreateDMRoomRequest):
         "created_by": body.user1_uuid
     }
 
-    rooms[room_id] = room
-    messages[room_id] = []
-    read_status[room_id] = {}
-    room_message_seq[room_id] = 0
-
+    rooms_collection.insert_one(room)
     return room
 
 # =====================================
@@ -200,13 +237,13 @@ def create_dm_room(body: CreateDMRoomRequest):
 @app.post("/team/rooms")
 def create_team_room(body: CreateTeamRoomRequest):
     if not body.room_name.strip():
-        return {"error": "room_name은 비어 있을 수 없습니다."}
+        raise HTTPException(status_code=400, detail="room_name은 비어 있을 수 없습니다.")
 
     if not user_exists(body.creator_uuid):
-        return {"error": f"{body.creator_uuid} 사용자가 존재하지 않습니다."}
+        raise HTTPException(status_code=404, detail=f"{body.creator_uuid} 사용자가 존재하지 않습니다.")
 
     if len(body.members) < 2:
-        return {"error": "팀 채팅방은 최소 2명 이상이어야 합니다."}
+        raise HTTPException(status_code=400, detail="팀 채팅방은 최소 2명 이상이어야 합니다.")
 
     unique_members = list(dict.fromkeys(body.members))
     if body.creator_uuid not in unique_members:
@@ -214,7 +251,7 @@ def create_team_room(body: CreateTeamRoomRequest):
 
     for member_uuid in unique_members:
         if not user_exists(member_uuid):
-            return {"error": f"{member_uuid} 사용자가 존재하지 않습니다."}
+            raise HTTPException(status_code=404, detail=f"{member_uuid} 사용자가 존재하지 않습니다.")
 
     room_id = str(uuid.uuid4())
 
@@ -227,11 +264,7 @@ def create_team_room(body: CreateTeamRoomRequest):
         "created_by": body.creator_uuid
     }
 
-    rooms[room_id] = room
-    messages[room_id] = []
-    read_status[room_id] = {}
-    room_message_seq[room_id] = 0
-
+    rooms_collection.insert_one(room)
     return room
 
 # =====================================
@@ -241,26 +274,23 @@ def create_team_room(body: CreateTeamRoomRequest):
 
 @app.post("/rooms/{room_id}/messages")
 def send_message(room_id: str, body: SendMessageRequest):
-    if not room_exists(room_id):
-        return {"error": "채팅방이 없습니다."}
-
-    room = rooms[room_id]
+    room = get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
     if not user_exists(body.sender_uuid):
-        return {"error": "보내는 사용자가 존재하지 않습니다."}
+        raise HTTPException(status_code=404, detail="보내는 사용자가 존재하지 않습니다.")
 
     if body.sender_uuid not in room["members"]:
-        return {"error": "이 사용자는 해당 채팅방 멤버가 아닙니다."}
+        raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
     if not body.text.strip():
-        return {"error": "메시지 내용은 비어 있을 수 없습니다."}
-
-    room_message_seq[room_id] += 1
+        raise HTTPException(status_code=400, detail="메시지 내용은 비어 있을 수 없습니다.")
 
     msg = {
         "message_id": str(uuid.uuid4()),
         "room_id": room_id,
-        "seq": room_message_seq[room_id],
+        "seq": get_next_seq(room_id),
         "sender_uuid": body.sender_uuid,
         "text": body.text,
         "message_type": "text",
@@ -271,7 +301,7 @@ def send_message(room_id: str, body: SendMessageRequest):
         "created_at": now_iso()
     }
 
-    messages[room_id].append(msg)
+    messages_collection.insert_one(msg)
     return msg
 
 # =====================================
@@ -301,55 +331,64 @@ def list_messages(
     """
 
     if not room_exists(room_id):
-        return {"error": "채팅방이 없습니다."}
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
     if limit <= 0:
-        return {"error": "limit는 1 이상이어야 합니다."}
+        raise HTTPException(status_code=400, detail="limit는 1 이상이어야 합니다.")
 
-    room_messages = messages[room_id]
-
-    # seq 기준 정렬 (안정성 확보)
-    sorted_messages = sorted(room_messages, key=lambda m: m["seq"])
-
-    # before와 after를 동시에 쓰지 못하게 제한
     if before and after:
-        return {"error": "before와 after는 동시에 사용할 수 없습니다."}
+        raise HTTPException(status_code=400, detail="before와 after는 동시에 사용할 수 없습니다.")
 
     # 기본: 최근 limit개
     if not before and not after:
-        result = sorted_messages[-limit:]
+        result = list(
+            messages_collection.find(
+                {"room_id": room_id},
+                {"_id": 0}
+            ).sort("seq", -1).limit(limit)
+        )
+        result.reverse()
         return result
 
     # before 기준
     if before:
-        target_index = None
+        target_msg = messages_collection.find_one(
+            {"message_id": before, "room_id": room_id},
+            {"_id": 0, "seq": 1}
+        )
+        if not target_msg:
+            raise HTTPException(status_code=404, detail="before에 해당하는 메시지를 찾을 수 없습니다.")
 
-        for i, msg in enumerate(sorted_messages):
-            if msg["message_id"] == before:
-                target_index = i
-                break
+        target_seq = target_msg["seq"]
 
-        if target_index is None:
-            return {"error": "before에 해당하는 메시지를 찾을 수 없습니다."}
-
-        result = sorted_messages[max(0, target_index - limit):target_index]
+        result = list(
+            messages_collection.find(
+                {"room_id": room_id, "seq": {"$lt": target_seq}},
+                {"_id": 0}
+            ).sort("seq", -1).limit(limit)
+        )
+        result.reverse()
         return result
 
     # after 기준
     if after:
-        target_index = None
+        target_msg = messages_collection.find_one(
+            {"message_id": after, "room_id": room_id},
+            {"_id": 0, "seq": 1}
+        )
+        if not target_msg:
+            raise HTTPException(status_code=404, detail="after에 해당하는 메시지를 찾을 수 없습니다.")
 
-        for i, msg in enumerate(sorted_messages):
-            if msg["message_id"] == after:
-                target_index = i
-                break
+        target_seq = target_msg["seq"]
 
-        if target_index is None:
-            return {"error": "after에 해당하는 메시지를 찾을 수 없습니다."}
-
-        result = sorted_messages[target_index + 1: target_index + 1 + limit]
+        result = list(
+            messages_collection.find(
+                {"room_id": room_id, "seq": {"$gt": target_seq}},
+                {"_id": 0}
+            ).sort("seq", 1).limit(limit)
+        )
         return result
-    
+
 # =====================================
 # 5. 사용자 채팅방 목록 조회
 # GET /users/{user_uuid}/rooms
@@ -358,15 +397,14 @@ def list_messages(
 @app.get("/users/{user_uuid}/rooms")
 def list_user_rooms(user_uuid: str):
     if not user_exists(user_uuid):
-        return {"error": "사용자가 존재하지 않습니다."}
+        raise HTTPException(status_code=404, detail="사용자가 존재하지 않습니다.")
 
-    result = []
-
-    for room in rooms.values():
-        if user_uuid in room["members"]:
-            result.append(room)
-
-    result.sort(key=lambda r: r["created_at"], reverse=True)
+    result = list(
+        rooms_collection.find(
+            {"members": user_uuid},
+            {"_id": 0}
+        ).sort("created_at", -1)
+    )
     return result
 
 # =====================================
@@ -377,15 +415,15 @@ def list_user_rooms(user_uuid: str):
 @app.delete("/messages/{message_id}")
 def delete_message(message_id: str, body: DeleteMessageRequest):
     if not user_exists(body.requester_uuid):
-        return {"error": "요청한 사용자가 존재하지 않습니다."}
+        raise HTTPException(status_code=404, detail="요청한 사용자가 존재하지 않습니다.")
 
     msg, room_id = find_message_by_id(message_id)
 
     if msg is None:
-        return {"error": "메시지를 찾을 수 없습니다."}
+        raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다.")
 
     if msg["sender_uuid"] != body.requester_uuid:
-        return {"error": "본인이 보낸 메시지만 삭제할 수 있습니다."}
+        raise HTTPException(status_code=403, detail="본인이 보낸 메시지만 삭제할 수 있습니다.")
 
     # 파일 메시지면 실제 파일도 삭제
     if msg.get("message_type") == "file":
@@ -395,13 +433,19 @@ def delete_message(message_id: str, body: DeleteMessageRequest):
             if os.path.exists(file_path):
                 os.remove(file_path)
 
-        msg["file_name"] = None
-        msg["saved_filename"] = None
-        msg["file_url"] = None
-
-    msg["text"] = "삭제된 메시지입니다."
-    msg["is_deleted"] = True
-    msg["message_type"] = "deleted"
+    messages_collection.update_one(
+        {"message_id": message_id},
+        {
+            "$set": {
+                "text": "삭제된 메시지입니다.",
+                "is_deleted": True,
+                "message_type": "deleted",
+                "file_name": None,
+                "saved_filename": None,
+                "file_url": None
+            }
+        }
+    )
 
     return {"message": "메시지가 삭제 처리되었습니다."}
 
@@ -416,19 +460,18 @@ def upload_file_to_room(
     sender_uuid: str = Form(...),
     file: UploadFile = File(...)
 ):
-    if not room_exists(room_id):
-        return {"error": "채팅방이 없습니다."}
-
-    room = rooms[room_id]
+    room = get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
     if not user_exists(sender_uuid):
-        return {"error": "보내는 사용자가 존재하지 않습니다."}
+        raise HTTPException(status_code=404, detail="보내는 사용자가 존재하지 않습니다.")
 
     if sender_uuid not in room["members"]:
-        return {"error": "이 사용자는 해당 채팅방 멤버가 아닙니다."}
+        raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
     if not file.filename:
-        return {"error": "파일 이름이 없습니다."}
+        raise HTTPException(status_code=400, detail="파일 이름이 없습니다.")
 
     file_id = str(uuid.uuid4())
     saved_filename = f"{file_id}_{file.filename}"
@@ -437,12 +480,10 @@ def upload_file_to_room(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    room_message_seq[room_id] += 1
-
     msg = {
         "message_id": str(uuid.uuid4()),
         "room_id": room_id,
-        "seq": room_message_seq[room_id],
+        "seq": get_next_seq(room_id),
         "sender_uuid": sender_uuid,
         "text": file.filename,
         "message_type": "file",
@@ -453,7 +494,7 @@ def upload_file_to_room(
         "created_at": now_iso()
     }
 
-    messages[room_id].append(msg)
+    messages_collection.insert_one(msg)
 
     return {
         "message": "파일 업로드 성공",
@@ -470,7 +511,7 @@ def download_file(saved_filename: str):
     file_path = os.path.join(UPLOAD_DIR, saved_filename)
 
     if not os.path.exists(file_path):
-        return {"error": "파일을 찾을 수 없습니다."}
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
 
     original_name = saved_filename.split("_", 1)[1] if "_" in saved_filename else saved_filename
 
@@ -486,18 +527,34 @@ def download_file(saved_filename: str):
 
 @app.post("/rooms/{room_id}/read")
 def mark_room_as_read(room_id: str, body: ReadMessageRequest):
-    if not room_exists(room_id):
-        return {"error": "채팅방이 없습니다."}
-
-    room = rooms[room_id]
+    room = get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
     if not user_exists(body.user_uuid):
-        return {"error": "사용자가 존재하지 않습니다."}
+        raise HTTPException(status_code=404, detail="사용자가 존재하지 않습니다.")
 
     if body.user_uuid not in room["members"]:
-        return {"error": "이 사용자는 해당 채팅방 멤버가 아닙니다."}
+        raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
-    read_status[room_id][body.user_uuid] = body.last_read_message_id
+    # 메시지 존재 확인은 선택 사항이지만, 안전하게 체크
+    target_msg = messages_collection.find_one(
+        {"message_id": body.last_read_message_id, "room_id": room_id},
+        {"_id": 1}
+    )
+    if not target_msg:
+        raise HTTPException(status_code=404, detail="last_read_message_id에 해당하는 메시지가 없습니다.")
+
+    read_status_collection.update_one(
+        {"room_id": room_id, "user_uuid": body.user_uuid},
+        {
+            "$set": {
+                "last_read_message_id": body.last_read_message_id,
+                "updated_at": now_iso()
+            }
+        },
+        upsert=True
+    )
 
     return {
         "message": "읽음 상태가 업데이트되었습니다.",
@@ -514,9 +571,20 @@ def mark_room_as_read(room_id: str, body: ReadMessageRequest):
 @app.get("/rooms/{room_id}/read-status")
 def get_read_status(room_id: str):
     if not room_exists(room_id):
-        return {"error": "채팅방이 없습니다."}
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
-    return read_status[room_id]
+    docs = list(
+        read_status_collection.find(
+            {"room_id": room_id},
+            {"_id": 0, "user_uuid": 1, "last_read_message_id": 1}
+        )
+    )
+
+    result = {}
+    for doc in docs:
+        result[doc["user_uuid"]] = doc["last_read_message_id"]
+
+    return result
 
 # =====================================
 # 11. 기존 방 기반 새 팀방 생성
@@ -525,30 +593,29 @@ def get_read_status(room_id: str):
 
 @app.post("/rooms/{room_id}/team")
 def create_team_from_existing_room(room_id: str, body: CreateTeamFromRoomRequest):
-    if not room_exists(room_id):
-        return {"error": "기존 채팅방이 없습니다."}
+    base_room = get_room(room_id)
+    if not base_room:
+        raise HTTPException(status_code=404, detail="기존 채팅방이 없습니다.")
 
     if not user_exists(body.creator_uuid):
-        return {"error": "creator_uuid 사용자가 존재하지 않습니다."}
+        raise HTTPException(status_code=404, detail="creator_uuid 사용자가 존재하지 않습니다.")
 
     if not body.room_name.strip():
-        return {"error": "새 팀방 이름(room_name)은 비어 있을 수 없습니다."}
-
-    base_room = rooms[room_id]
+        raise HTTPException(status_code=400, detail="새 팀방 이름(room_name)은 비어 있을 수 없습니다.")
 
     if body.creator_uuid not in base_room["members"]:
-        return {"error": "초대하는 사용자는 기존 채팅방 멤버여야 합니다."}
+        raise HTTPException(status_code=403, detail="초대하는 사용자는 기존 채팅방 멤버여야 합니다.")
 
     new_members = list(base_room["members"])
 
     for new_member_uuid in body.new_members:
         if not user_exists(new_member_uuid):
-            return {"error": f"{new_member_uuid} 사용자가 존재하지 않습니다."}
+            raise HTTPException(status_code=404, detail=f"{new_member_uuid} 사용자가 존재하지 않습니다.")
         if new_member_uuid not in new_members:
             new_members.append(new_member_uuid)
 
     if len(new_members) < 2:
-        return {"error": "팀 채팅방은 최소 2명 이상이어야 합니다."}
+        raise HTTPException(status_code=400, detail="팀 채팅방은 최소 2명 이상이어야 합니다.")
 
     new_room_id = str(uuid.uuid4())
 
@@ -562,9 +629,5 @@ def create_team_from_existing_room(room_id: str, body: CreateTeamFromRoomRequest
         "created_from_room_id": room_id
     }
 
-    rooms[new_room_id] = new_room
-    messages[new_room_id] = []
-    read_status[new_room_id] = {}
-    room_message_seq[new_room_id] = 0
-
+    rooms_collection.insert_one(new_room)
     return new_room
