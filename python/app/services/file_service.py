@@ -1,6 +1,5 @@
 import os
 import shutil
-from typing import Optional
 import uuid
 from fastapi import HTTPException, UploadFile
 
@@ -10,6 +9,7 @@ from app.services.room_service import get_room
 from app.services.user_service import user_exists
 from app.services.message_service import get_next_seq
 from app.utils.common import now_iso
+
 
 def upload_file_to_room_service(room_id: str, sender_uuid: str, file: UploadFile):
     room = get_room(room_id)
@@ -24,8 +24,6 @@ def upload_file_to_room_service(room_id: str, sender_uuid: str, file: UploadFile
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="파일 이름이 없습니다.")
-
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
 
     file_id = str(uuid.uuid4())
     saved_filename = f"{file_id}_{file.filename}"
@@ -55,18 +53,11 @@ def upload_file_to_room_service(room_id: str, sender_uuid: str, file: UploadFile
         "message_data": msg
     }
 
-def get_file_path_service(saved_filename: str):
+
+def download_file_service(saved_filename: str):
     file_path = os.path.join(UPLOAD_DIR, saved_filename)
+
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+
     return file_path
-
-def get_original_filename(saved_filename: str):
-    return saved_filename.split("_", 1)[1] if "_" in saved_filename else saved_filename
-
-def remove_uploaded_file(saved_filename: Optional[str]):
-    if not saved_filename:
-        return
-    file_path = os.path.join(UPLOAD_DIR, saved_filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
