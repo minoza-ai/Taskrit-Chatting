@@ -1,10 +1,12 @@
-from typing import Optional, List
+from typing import List, Optional
+
 
 def serialize_doc(doc: Optional[dict]) -> Optional[dict]:
     if doc is None:
         return None
     doc.pop("_id", None)
     return doc
+
 
 def serialize_docs(docs: List[dict]) -> List[dict]:
     result = []
