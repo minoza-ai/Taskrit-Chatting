@@ -1,33 +1,34 @@
 from fastapi import HTTPException
 
-from app.database import read_status_collection, messages_collection
+from app.database import messages_collection, read_status_collection
 from app.services.room_service import get_room, room_exists
 from app.services.user_service import user_exists
 from app.utils.common import now_iso
 
-def mark_room_as_read_service(room_id: str, user_uuid: str, last_read_message_id: str):
+
+def mark_room_as_read_service(room_id: str, body):
     room = get_room(room_id)
     if not room:
         raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
-    if not user_exists(user_uuid):
+    if not user_exists(body.user_uuid):
         raise HTTPException(status_code=404, detail="사용자가 존재하지 않습니다.")
 
-    if user_uuid not in room["members"]:
+    if body.user_uuid not in room["members"]:
         raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
     target_msg = messages_collection.find_one(
-        {"message_id": last_read_message_id, "room_id": room_id},
+        {"message_id": body.last_read_message_id, "room_id": room_id},
         {"_id": 1}
     )
     if not target_msg:
         raise HTTPException(status_code=404, detail="last_read_message_id에 해당하는 메시지가 없습니다.")
 
     read_status_collection.update_one(
-        {"room_id": room_id, "user_uuid": user_uuid},
+        {"room_id": room_id, "user_uuid": body.user_uuid},
         {
             "$set": {
-                "last_read_message_id": last_read_message_id,
+                "last_read_message_id": body.last_read_message_id,
                 "updated_at": now_iso()
             }
         },
@@ -37,9 +38,10 @@ def mark_room_as_read_service(room_id: str, user_uuid: str, last_read_message_id
     return {
         "message": "읽음 상태가 업데이트되었습니다.",
         "room_id": room_id,
-        "user_uuid": user_uuid,
-        "last_read_message_id": last_read_message_id
+        "user_uuid": body.user_uuid,
+        "last_read_message_id": body.last_read_message_id
     }
+
 
 def get_read_status_service(room_id: str):
     if not room_exists(room_id):
@@ -52,4 +54,8 @@ def get_read_status_service(room_id: str):
         )
     )
 
-    return {doc["user_uuid"]: doc["last_read_message_id"] for doc in docs}
+    result = {}
+    for doc in docs:
+        result[doc["user_uuid"]] = doc["last_read_message_id"]
+
+    return result
