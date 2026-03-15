@@ -7,9 +7,11 @@ from app.services.read_service import (
 
 router = APIRouter(tags=["reads"])
 
+
 @router.post("/rooms/{room_id}/read")
 def mark_room_as_read(room_id: str, body: ReadMessageRequest):
-    return mark_room_as_read_service(room_id, body.user_uuid, body.last_read_message_id)
+    return mark_room_as_read_service(room_id, body)
+
 
 @router.get("/rooms/{room_id}/read-status")
 def get_read_status(room_id: str):
