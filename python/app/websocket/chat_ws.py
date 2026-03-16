@@ -1,8 +1,9 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
 
-from app.dependencies import validate_ws_room_member
-from app.services.message_service import send_message_service
+from app.dependencies import fetch_current_user_by_token
+from app.services.room_service import get_room
+from app.services.message_service import send_message_service, list_messages_service
 from app.websocket.manager import manager
 
 router = APIRouter(tags=["websocket"])
@@ -15,58 +16,134 @@ class WSChatMessage(BaseModel):
 
 @router.websocket("/ws/rooms/{room_id}")
 async def websocket_chat(websocket: WebSocket, room_id: str):
-    try:
-        auth = await validate_ws_room_member(websocket, room_id)
-    except Exception:
-        return
+    user_uuid = None
+    nickname = None
+    connection_id = None
 
-    current_user = auth["current_user"]
-    user_uuid = current_user["user_uuid"]
-    nickname = current_user["nickname"]
-
-    await manager.connect(room_id, user_uuid, websocket)
-
-    await manager.broadcast(
-        room_id,
-        {
-            "type": "system",
-            "event": "user_joined",
-            "room_id": room_id,
-            "user_uuid": user_uuid,
-            "nickname": nickname,
-        },
-    )
+    await websocket.accept()
 
     try:
+        token = websocket.query_params.get("token")
+        last_message_id = websocket.query_params.get("last_message_id")
+
+        if not token:
+            await websocket.send_json({
+                "type": "error",
+                "message": "token query parameter가 필요합니다."
+            })
+            await websocket.close(code=4401)
+            return
+
+        current_user = fetch_current_user_by_token(token)
+
+        user_uuid = current_user["user_uuid"]
+        nickname = current_user["nickname"]
+
+        room = get_room(room_id)
+
+        if not room:
+            await websocket.send_json({
+                "type": "error",
+                "message": "채팅방이 없습니다."
+            })
+            await websocket.close(code=4404)
+            return
+
+        if user_uuid not in room["members"]:
+            await websocket.send_json({
+                "type": "error",
+                "message": "이 사용자는 해당 채팅방 멤버가 아닙니다."
+            })
+            await websocket.close(code=4403)
+            return
+
+        connection_id, is_first_connection = await manager.connect(room_id, user_uuid, websocket)
+
+        if last_message_id:
+            try:
+                missed_messages = list_messages_service(
+                    room_id=room_id,
+                    limit=100,
+                    after=last_message_id,
+                )
+
+                for missed_message in missed_messages:
+                    await websocket.send_json({
+                        "type": "message",
+                        "data": missed_message,
+                        "sender": {
+                            "user_uuid": missed_message["sender_uuid"],
+                            "nickname": None,
+                        },
+                        "resumed": True,
+                    })
+            except Exception:
+                await websocket.send_json({
+                    "type": "resume_failed",
+                    "message": "이전 메시지 복구에 실패했습니다."
+                })
+
+        if is_first_connection:
+            await manager.broadcast(
+                room_id,
+                {
+                    "type": "system",
+                    "event": "user_joined",
+                    "room_id": room_id,
+                    "user_uuid": user_uuid,
+                    "nickname": nickname,
+                },
+            )
+
         while True:
             data = await websocket.receive_json()
 
             try:
                 payload = WSChatMessage(**data)
             except ValidationError as e:
-                await manager.send_personal_message(
-                    {
-                        "type": "error",
-                        "message": "잘못된 WebSocket 메시지 형식입니다.",
-                        "detail": e.errors(),
-                    },
-                    websocket,
-                )
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "잘못된 메시지 형식입니다.",
+                    "detail": e.errors(),
+                })
                 continue
 
             if payload.type == "ping":
-                await manager.send_personal_message({"type": "pong"}, websocket)
+                await websocket.send_json({"type": "pong"})
+                continue
+
+            if payload.type == "typing":
+                await manager.broadcast(
+                    room_id,
+                    {
+                        "type": "typing",
+                        "room_id": room_id,
+                        "user_uuid": user_uuid,
+                        "nickname": nickname,
+                    },
+                    exclude_connection_id=connection_id,
+                )
+                continue
+
+            if payload.type == "stop_typing":
+                await manager.broadcast(
+                    room_id,
+                    {
+                        "type": "stop_typing",
+                        "room_id": room_id,
+                        "user_uuid": user_uuid,
+                        "nickname": nickname,
+                    },
+                    exclude_connection_id=connection_id,
+                )
                 continue
 
             if payload.type == "message":
                 if not payload.text or not payload.text.strip():
-                    await manager.send_personal_message(
-                        {
-                            "type": "error",
-                            "message": "메시지 내용은 비어 있을 수 없습니다.",
-                        },
-                        websocket,
-                    )
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "메시지 내용은 비어 있을 수 없습니다."
+                    })
                     continue
 
                 saved_message = send_message_service(
@@ -88,38 +165,38 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                 )
                 continue
 
-            await manager.send_personal_message(
-                {
-                    "type": "error",
-                    "message": f"지원하지 않는 type입니다: {payload.type}",
-                },
-                websocket,
-            )
+            await websocket.send_json({
+                "type": "error",
+                "message": f"지원하지 않는 type입니다: {payload.type}"
+            })
 
     except WebSocketDisconnect:
-        manager.disconnect(room_id, user_uuid)
-        await manager.broadcast(
-            room_id,
-            {
-                "type": "system",
-                "event": "user_left",
-                "room_id": room_id,
-                "user_uuid": user_uuid,
-                "nickname": nickname,
-            },
-        )
-    except Exception:
-        manager.disconnect(room_id, user_uuid)
+        if connection_id:
+            disconnected_user_uuid, is_last_connection = manager.disconnect(room_id, connection_id)
+
+            if disconnected_user_uuid and is_last_connection:
+                await manager.broadcast(
+                    room_id,
+                    {
+                        "type": "system",
+                        "event": "user_left",
+                        "room_id": room_id,
+                        "user_uuid": user_uuid,
+                        "nickname": nickname,
+                    },
+                )
+
+    except Exception as e:
         try:
-            await manager.broadcast(
-                room_id,
-                {
-                    "type": "system",
-                    "event": "user_left",
-                    "room_id": room_id,
-                    "user_uuid": user_uuid,
-                    "nickname": nickname,
-                },
-            )
+            await websocket.send_json({
+                "type": "error",
+                "message": "websocket 내부 예외 발생",
+                "detail": str(e),
+            })
+        except Exception:
+            pass
+
+        try:
+            await websocket.close(code=1011)
         except Exception:
             pass
