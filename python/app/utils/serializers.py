@@ -4,13 +4,18 @@ from typing import List, Optional
 def serialize_doc(doc: Optional[dict]) -> Optional[dict]:
     if doc is None:
         return None
-    doc.pop("_id", None)
-    return doc
+
+    result = dict(doc)
+    result.pop("_id", None)
+    return result
 
 
 def serialize_docs(docs: List[dict]) -> List[dict]:
     result = []
+
     for doc in docs:
-        doc.pop("_id", None)
-        result.append(doc)
+        item = dict(doc)
+        item.pop("_id", None)
+        result.append(item)
+
     return result
