@@ -5,7 +5,6 @@ from fastapi import HTTPException
 
 from app.database import messages_collection
 from app.services.room_service import get_room, room_exists
-from app.services.user_service import user_exists
 from app.config import UPLOAD_DIR
 from app.utils.common import now_iso
 from app.utils.serializers import serialize_doc
@@ -27,26 +26,23 @@ def get_next_seq(room_id: str) -> int:
     return 1 if not last_msg else last_msg["seq"] + 1
 
 
-def send_message_service(room_id: str, body):
+def send_message_service(room_id: str, sender_uuid: str, text: str):
     room = get_room(room_id)
     if not room:
         raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
-    if not user_exists(body.sender_uuid):
-        raise HTTPException(status_code=404, detail="보내는 사용자가 존재하지 않습니다.")
-
-    if body.sender_uuid not in room["members"]:
+    if sender_uuid not in room["members"]:
         raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
-    if not body.text.strip():
+    if not text.strip():
         raise HTTPException(status_code=400, detail="메시지 내용은 비어 있을 수 없습니다.")
 
     msg = {
         "message_id": str(uuid.uuid4()),
         "room_id": room_id,
         "seq": get_next_seq(room_id),
-        "sender_uuid": body.sender_uuid,
-        "text": body.text,
+        "sender_uuid": sender_uuid,
+        "text": text,
         "message_type": "text",
         "is_deleted": False,
         "file_name": None,
@@ -112,25 +108,21 @@ def list_messages_service(
 
     target_seq = target_msg["seq"]
 
-    result = list(
+    return list(
         messages_collection.find(
             {"room_id": room_id, "seq": {"$gt": target_seq}},
             {"_id": 0}
         ).sort("seq", 1).limit(limit)
     )
-    return result
 
 
-def delete_message_service(message_id: str, body):
-    if not user_exists(body.requester_uuid):
-        raise HTTPException(status_code=404, detail="요청한 사용자가 존재하지 않습니다.")
-
+def delete_message_service(message_id: str, requester_uuid: str):
     msg, _ = find_message_by_id(message_id)
 
     if msg is None:
         raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다.")
 
-    if msg["sender_uuid"] != body.requester_uuid:
+    if msg["sender_uuid"] != requester_uuid:
         raise HTTPException(status_code=403, detail="본인이 보낸 메시지만 삭제할 수 있습니다.")
 
     if msg.get("message_type") == "file":
