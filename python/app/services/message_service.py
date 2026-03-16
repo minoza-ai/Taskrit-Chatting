@@ -12,10 +12,13 @@ from app.utils.serializers import serialize_doc
 
 def find_message_by_id(message_id: str):
     msg = messages_collection.find_one({"message_id": message_id})
+
     if not msg:
         return None, None
+
     room_id = msg["room_id"]
-    return serialize_doc(msg), room_id
+    result = serialize_doc(msg)
+    return result, room_id
 
 
 def get_next_seq(room_id: str) -> int:
@@ -23,18 +26,21 @@ def get_next_seq(room_id: str) -> int:
         {"room_id": room_id},
         sort=[("seq", -1)]
     )
-    return 1 if not last_msg else last_msg["seq"] + 1
+
+    next_seq = 1 if not last_msg else int(last_msg["seq"]) + 1
+    return next_seq
 
 
 def send_message_service(room_id: str, sender_uuid: str, text: str):
     room = get_room(room_id)
+
     if not room:
         raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
     if sender_uuid not in room["members"]:
         raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
-    if not text.strip():
+    if text is None or not str(text).strip():
         raise HTTPException(status_code=400, detail="메시지 내용은 비어 있을 수 없습니다.")
 
     msg = {
@@ -52,7 +58,8 @@ def send_message_service(room_id: str, sender_uuid: str, text: str):
     }
 
     messages_collection.insert_one(msg)
-    return msg
+
+    return serialize_doc(msg)
 
 
 def list_messages_service(
@@ -85,6 +92,7 @@ def list_messages_service(
             {"message_id": before, "room_id": room_id},
             {"_id": 0, "seq": 1}
         )
+
         if not target_msg:
             raise HTTPException(status_code=404, detail="before에 해당하는 메시지를 찾을 수 없습니다.")
 
@@ -103,17 +111,20 @@ def list_messages_service(
         {"message_id": after, "room_id": room_id},
         {"_id": 0, "seq": 1}
     )
+
     if not target_msg:
         raise HTTPException(status_code=404, detail="after에 해당하는 메시지를 찾을 수 없습니다.")
 
     target_seq = target_msg["seq"]
 
-    return list(
+    result = list(
         messages_collection.find(
             {"room_id": room_id, "seq": {"$gt": target_seq}},
             {"_id": 0}
         ).sort("seq", 1).limit(limit)
     )
+
+    return result
 
 
 def delete_message_service(message_id: str, requester_uuid: str):
