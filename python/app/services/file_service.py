@@ -6,18 +6,15 @@ from fastapi import HTTPException, UploadFile
 from app.config import UPLOAD_DIR
 from app.database import messages_collection
 from app.services.room_service import get_room
-from app.services.user_service import user_exists
 from app.services.message_service import get_next_seq
 from app.utils.common import now_iso
+from app.utils.serializers import serialize_doc
 
 
 def upload_file_to_room_service(room_id: str, sender_uuid: str, file: UploadFile):
     room = get_room(room_id)
     if not room:
         raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
-
-    if not user_exists(sender_uuid):
-        raise HTTPException(status_code=404, detail="보내는 사용자가 존재하지 않습니다.")
 
     if sender_uuid not in room["members"]:
         raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
@@ -50,7 +47,7 @@ def upload_file_to_room_service(room_id: str, sender_uuid: str, file: UploadFile
 
     return {
         "message": "파일 업로드 성공",
-        "message_data": msg
+        "message_data": serialize_doc(msg)
     }
 
 
