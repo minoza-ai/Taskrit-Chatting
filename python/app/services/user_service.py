@@ -14,6 +14,20 @@ def get_all_users():
     return list(users_collection.find({}, {"_id": 0}))
 
 
+def upsert_user(user_uuid: str, user_id: str, nickname: str):
+    users_collection.update_one(
+        {"user_uuid": user_uuid},
+        {
+            "$set": {
+                "user_uuid": user_uuid,
+                "user_id": user_id,
+                "nickname": nickname,
+            }
+        },
+        upsert=True,
+    )
+
+
 def seed_users():
     seed_data = [
         {

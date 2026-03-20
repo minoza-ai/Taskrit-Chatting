@@ -1,11 +1,8 @@
-import os
 import requests
 from fastapi import Depends, Header, HTTPException
 
+from app.config import USER_API_BASE_URL, USER_ME_ENDPOINT
 from app.services.room_service import get_room
-
-USER_API_BASE_URL = os.getenv("USER_API_BASE_URL", "https://api.taskr.it")
-USER_ME_ENDPOINT = os.getenv("USER_ME_ENDPOINT", "/user/me")
 
 
 def get_bearer_token(authorization: str | None = Header(default=None)) -> str:
@@ -82,6 +79,14 @@ def fetch_current_user_by_token(token: str) -> dict:
                 status_code=503,
                 detail=f"인증 서비스 응답에 {field}가 없습니다.",
             )
+
+    from app.services.user_service import upsert_user
+
+    upsert_user(
+        user_uuid=user["user_uuid"],
+        user_id=user["user_id"],
+        nickname=user["nickname"],
+    )
 
     return user
 
