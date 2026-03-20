@@ -273,26 +273,27 @@ pip install -r requirements.txt
 
 서버 실행
 
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+uvicorn --app-dir python app.main:app --host 0.0.0.0 --port 8001 --reload
 
 --------------------------------------------------
 
 Project Structure
 
-chat-service
- ├ app
- │ ├ main.py
- │ ├ config.py
- │ ├ database.py
- │ ├ dependencies.py
- │ ├ routers
- │ ├ schemas
- │ ├ services
- │ ├ websocket
- │ └ utils
- │
+Taskrit-Chatting
+ ├ python
+ │ ├ app
+ │ │ ├ main.py
+ │ │ ├ config.py
+ │ │ ├ database.py
+ │ │ ├ dependencies.py
+ │ │ ├ routers
+ │ │ ├ schemas
+ │ │ ├ services
+ │ │ ├ websocket
+ │ │ └ utils
+ │ └ server.py
+ ├ server.py
  ├ uploads
- ├ test_app.html
  ├ requirements.txt
  └ README.md
 

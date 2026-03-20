@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 
 from app.config import APP_NAME
 from app.database import create_indexes
@@ -25,19 +24,9 @@ def startup_event():
     seed_users()
 
 
-@app.get("/")
-def serve_index():
-    return FileResponse("index.html")
-
-
-@app.get("/test")
-def serve_test_dashboard():
-    return FileResponse("test_dashboard.html")
-
-
-@app.get("/demo")
-def serve_chat_demo():
-    return FileResponse("chat_demo.html")
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 
 app.include_router(room.router)
