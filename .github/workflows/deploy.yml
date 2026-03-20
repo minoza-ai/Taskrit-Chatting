@@ -13,6 +13,7 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/taskrit-chatting
   CONTAINER_NAME: taskrit-chatting
   CONTAINER_PORT: 3001
+  MONGO_CONTAINER_NAME: taskrit-mongodb
 
 jobs:
   generate-openapi:
@@ -123,12 +124,12 @@ jobs:
             echo "::error::Missing required secret: CHAT_SERVER_PORT"
             exit 1
           fi
-          if [ -z "${{ secrets.CHAT_MONGODB_URI_PROD }}" ]; then
-            echo "::error::Missing required secret: CHAT_MONGODB_URI_PROD"
+          if [ -z "${{ secrets.MONGODB_USER }}" ]; then
+            echo "::error::Missing required secret: MONGODB_USER"
             exit 1
           fi
-          if [ -z "${{ secrets.CHAT_MONGODB_DB_PROD }}" ]; then
-            echo "::error::Missing required secret: CHAT_MONGODB_DB_PROD"
+          if [ -z "${{ secrets.MONGODB_PASSWORD }}" ]; then
+            echo "::error::Missing required secret: MONGODB_PASSWORD"
             exit 1
           fi
           if [ -z "${{ secrets.CHAT_USER_API_BASE_URL_PROD }}" ]; then
@@ -165,8 +166,10 @@ jobs:
               --network "taskrit-network" \
               --restart unless-stopped \
               -e NODE_ENV=production \
-              -e MONGODB_URI_PROD="${{ secrets.CHAT_MONGODB_URI_PROD }}" \
-              -e MONGODB_DB_PROD="${{ secrets.CHAT_MONGODB_DB_PROD }}" \
+              -e MONGODB_USER="${{ secrets.MONGODB_USER }}" \
+              -e MONGODB_PASSWORD="${{ secrets.MONGODB_PASSWORD }}" \
+              -e MONGODB_URI="mongodb://${{ secrets.MONGODB_USER }}:${{ secrets.MONGODB_PASSWORD }}@${{ env.MONGO_CONTAINER_NAME }}:27017/taskrit-chatting?authSource=admin" \
+              -e MONGODB_DB="taskrit-chatting" \
               -e USER_API_BASE_URL_PROD="${{ secrets.CHAT_USER_API_BASE_URL_PROD }}" \
               -p "${{ secrets.CHAT_SERVER_PORT }}:${{ env.CONTAINER_PORT }}" \
               "${{ env.IMAGE_NAME }}:latest"
