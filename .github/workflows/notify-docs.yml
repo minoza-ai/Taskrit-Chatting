@@ -1,0 +1,39 @@
+name: Notify Docs Repo
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'openapi.json'
+
+jobs:
+  notify-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger docs repo update
+        run: |
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GH_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/minoza-ai/docs/dispatches \
+            -d '{
+              "event_type": "update-docs",
+              "client_payload": {
+                "repo": "${{ github.repository }}",
+                "ref": "${{ github.ref_name }}",
+                "sha": "${{ github.sha }}",
+                "spec_path": "openapi.json",
+                "target_path": "api-reference/chat-openapi.json"
+              }
+            }')
+
+          if [ "$HTTP_STATUS" -ne 204 ]; then
+            echo "::error::Failed to trigger docs repo. HTTP status: $HTTP_STATUS"
+            echo "Check that GH_TOKEN has 'repo' scope and has access to minoza-ai/docs"
+            exit 1
+          fi
+
+          echo "Successfully triggered docs repo update (HTTP $HTTP_STATUS)"
