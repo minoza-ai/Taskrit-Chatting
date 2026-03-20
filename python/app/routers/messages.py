@@ -8,18 +8,34 @@ from app.services.message_service import (
     list_messages_service,
     delete_message_service,
 )
+from app.websocket.manager import manager
 
 router = APIRouter(tags=["messages"])
 
 
 @router.post("/rooms/{room_id}/messages")
-def send_message(
+async def send_message(
     room_id: str,
     body: SendMessageRequest,
     auth: dict = Depends(validate_room_member),
 ):
     current_user = auth["current_user"]
-    return send_message_service(room_id, current_user["user_uuid"], body.text)
+    saved_message = send_message_service(room_id, current_user["user_uuid"], body.text)
+
+    # REST 전송도 WebSocket 구독자에게 동일 이벤트를 push 해야 실시간 동기화된다.
+    await manager.broadcast(
+        room_id,
+        {
+            "type": "message",
+            "data": saved_message,
+            "sender": {
+                "user_uuid": current_user["user_uuid"],
+                "nickname": current_user.get("nickname"),
+            },
+        },
+    )
+
+    return saved_message
 
 
 @router.get("/rooms/{room_id}/messages")

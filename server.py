@@ -1,6 +1,14 @@
 from pathlib import Path
 import sys
 
+try:
+    import websockets  # noqa: F401
+except ImportError as err:
+    raise RuntimeError(
+        "Missing websocket runtime dependency. Run `pip install -r requirements.txt` "
+        "and start the server with the project Python environment."
+    ) from err
+
 import uvicorn
 
 # Make python/app importable when running from the repository root.
