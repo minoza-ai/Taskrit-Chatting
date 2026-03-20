@@ -7,6 +7,8 @@ class ConnectionManager:
     def __init__(self):
         # room_id -> connection_id -> {"user_uuid": str, "websocket": WebSocket}
         self.active_connections: dict[str, dict[str, dict]] = defaultdict(dict)
+        # user_uuid -> notification_connection_id -> {"websocket": WebSocket}
+        self.user_notification_connections: dict[str, dict[str, dict]] = defaultdict(dict)
 
     async def connect(self, room_id: str, user_uuid: str, websocket: WebSocket) -> tuple[str, bool]:
         was_user_connected = self.is_user_connected(room_id, user_uuid)
@@ -19,6 +21,22 @@ class ConnectionManager:
 
         is_first_connection = not was_user_connected
         return connection_id, is_first_connection
+
+    def connect_user_notifications(self, user_uuid: str, websocket: WebSocket) -> str:
+        connection_id = str(uuid.uuid4())
+        self.user_notification_connections[user_uuid][connection_id] = {
+            "websocket": websocket,
+        }
+        return connection_id
+
+    def disconnect_user_notifications(self, user_uuid: str, connection_id: str):
+        if user_uuid not in self.user_notification_connections:
+            return
+
+        self.user_notification_connections[user_uuid].pop(connection_id, None)
+
+        if not self.user_notification_connections[user_uuid]:
+            self.user_notification_connections.pop(user_uuid, None)
 
     def disconnect(self, room_id: str, connection_id: str) -> tuple[str | None, bool]:
         if room_id not in self.active_connections:
@@ -111,6 +129,23 @@ class ConnectionManager:
 
         for connection_id in disconnected_connection_ids:
             self.disconnect(room_id, connection_id)
+
+    async def send_user_notification(self, user_uuid: str, payload: dict):
+        if user_uuid not in self.user_notification_connections:
+            return
+
+        disconnected_connection_ids = []
+
+        for connection_id, connection_info in self.user_notification_connections[user_uuid].items():
+            websocket = connection_info["websocket"]
+
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                disconnected_connection_ids.append(connection_id)
+
+        for connection_id in disconnected_connection_ids:
+            self.disconnect_user_notifications(user_uuid, connection_id)
 
 
 manager = ConnectionManager()

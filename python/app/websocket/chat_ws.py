@@ -14,6 +14,46 @@ class WSChatMessage(BaseModel):
     text: str | None = None
 
 
+@router.websocket("/ws/notifications")
+async def websocket_notifications(websocket: WebSocket):
+    user_uuid = None
+    connection_id = None
+
+    await websocket.accept()
+
+    try:
+        token = websocket.query_params.get("token")
+
+        if not token:
+            await websocket.send_json({
+                "type": "error",
+                "message": "token query parameter가 필요합니다.",
+            })
+            await websocket.close(code=4401)
+            return
+
+        current_user = fetch_current_user_by_token(token)
+        user_uuid = current_user["user_uuid"]
+        connection_id = manager.connect_user_notifications(user_uuid, websocket)
+
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+
+    except WebSocketDisconnect:
+        if user_uuid and connection_id:
+            manager.disconnect_user_notifications(user_uuid, connection_id)
+
+    except Exception:
+        if user_uuid and connection_id:
+            manager.disconnect_user_notifications(user_uuid, connection_id)
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
+
+
 @router.websocket("/ws/rooms/{room_id}")
 async def websocket_chat(websocket: WebSocket, room_id: str):
     user_uuid = None
@@ -163,6 +203,26 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                         },
                     },
                 )
+
+                for member_uuid in room["members"]:
+                    if member_uuid == user_uuid:
+                        continue
+
+                    await manager.send_user_notification(
+                        member_uuid,
+                        {
+                            "type": "notification",
+                            "event": "new_message",
+                            "room_id": room_id,
+                            "room_name": room.get("room_name") or "채팅방",
+                            "message": {
+                                "message_id": saved_message["message_id"],
+                                "text": saved_message["text"],
+                                "sender_uuid": user_uuid,
+                                "created_at": saved_message["created_at"],
+                            },
+                        },
+                    )
                 continue
 
             await websocket.send_json({
