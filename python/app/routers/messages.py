@@ -10,7 +10,7 @@ from app.services.message_service import (
     edit_message_service,
 )
 from app.websocket.manager import manager
-from app.services.room_service import get_room
+from app.services.room_service import get_room, get_dm_display_name_for_user
 
 router = APIRouter(tags=["messages"])
 
@@ -49,7 +49,7 @@ async def send_message(
                     "type": "notification",
                     "event": "new_message",
                     "room_id": room_id,
-                    "room_name": room.get("room_name") or "채팅방",
+                    "room_name": get_dm_display_name_for_user(room, member_uuid),
                     "message": {
                         "message_id": saved_message["message_id"],
                         "text": saved_message["text"],

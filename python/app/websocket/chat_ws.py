@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
 
 from app.dependencies import fetch_current_user_by_token
-from app.services.room_service import get_room
+from app.services.room_service import get_room, get_dm_display_name_for_user
 from app.services.message_service import send_message_service, list_messages_service
 from app.websocket.manager import manager
 
@@ -214,7 +214,7 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                             "type": "notification",
                             "event": "new_message",
                             "room_id": room_id,
-                            "room_name": room.get("room_name") or "채팅방",
+                            "room_name": get_dm_display_name_for_user(room, member_uuid),
                             "message": {
                                 "message_id": saved_message["message_id"],
                                 "text": saved_message["text"],

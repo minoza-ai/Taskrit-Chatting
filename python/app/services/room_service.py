@@ -2,7 +2,7 @@ import uuid
 from fastapi import HTTPException
 
 from app.database import rooms_collection, messages_collection, read_status_collection
-from app.services.user_service import user_exists
+from app.services.user_service import user_exists, find_user_by_uuid
 from app.utils.common import now_iso, make_dm_key
 from app.utils.serializers import serialize_doc
 
@@ -202,3 +202,35 @@ def create_team_from_existing_room_service(room_id: str, current_user_uuid: str,
 
     rooms_collection.insert_one(new_room)
     return serialize_doc(new_room)
+
+
+def get_dm_display_name_for_user(room: dict, current_user_uuid: str):
+    """
+    DM방에서 현재 사용자 관점의 표시될 이름을 반환합니다.
+    DM인 경우 상대방의 이름으로 "{상대방}님과의 대화"를 반환합니다.
+    Team방인 경우 원본 room_name을 반환합니다.
+    """
+    # Team 방이면 원본 room_name 반환
+    if room.get("room_type") != "dm":
+        return room.get("room_name") or "채팅방"
+
+    # DM 방인 경우, 상대방의 UUID 찾기
+    members = room.get("members", [])
+    other_user_uuid = None
+
+    for member_uuid in members:
+        if member_uuid != current_user_uuid:
+            other_user_uuid = member_uuid
+            break
+
+    if not other_user_uuid:
+        return room.get("room_name") or "채팅방"
+
+    # 상대방의 정보 조회
+    other_user = find_user_by_uuid(other_user_uuid)
+    if not other_user:
+        return room.get("room_name") or "채팅방"
+
+    # 상대방 이름으로 표시
+    other_user_nickname = other_user.get("nickname", "사용자")
+    return f"{other_user_nickname}님과의 대화"
