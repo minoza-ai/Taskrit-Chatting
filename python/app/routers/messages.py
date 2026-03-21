@@ -2,11 +2,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from app.dependencies import get_current_user, validate_room_member
-from app.schemas.message import SendMessageRequest
+from app.schemas.message import SendMessageRequest, EditMessageRequest
 from app.services.message_service import (
     send_message_service,
     list_messages_service,
     delete_message_service,
+    edit_message_service,
 )
 from app.websocket.manager import manager
 from app.services.room_service import get_room
@@ -91,4 +92,27 @@ async def delete_message(
     return {
         "message": "메시지가 삭제 처리되었습니다.",
         "data": deleted_message,
+    }
+
+
+@router.put("/messages/{message_id}")
+async def edit_message(
+    message_id: str,
+    body: EditMessageRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    edited_message = edit_message_service(message_id, body.text, current_user["user_uuid"])
+
+    await manager.broadcast(
+        edited_message["room_id"],
+        {
+            "type": "message_updated",
+            "data": edited_message,
+            "user_uuid": current_user["user_uuid"],
+        },
+    )
+
+    return {
+        "message": "메시지가 수정되었습니다.",
+        "data": edited_message,
     }

@@ -190,6 +190,43 @@ def list_messages_service(
     return _attach_unread_member_count(room, result)
 
 
+def edit_message_service(message_id: str, new_text: str, requester_uuid: str):
+    msg, _ = find_message_by_id(message_id)
+
+    if msg is None:
+        raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다.")
+
+    if msg["sender_uuid"] != requester_uuid:
+        raise HTTPException(status_code=403, detail="본인이 보낸 메시지만 수정할 수 있습니다.")
+
+    if msg.get("is_deleted") or msg.get("message_type") == "deleted":
+        raise HTTPException(status_code=400, detail="삭제된 메시지는 수정할 수 없습니다.")
+
+    if new_text is None or not str(new_text).strip():
+        raise HTTPException(status_code=400, detail="메시지 내용은 비어 있을 수 없습니다.")
+
+    if msg.get("message_type") != "text":
+        raise HTTPException(status_code=400, detail="텍스트 메시지만 수정할 수 있습니다.")
+
+    messages_collection.update_one(
+        {"message_id": message_id},
+        {
+            "$set": {
+                "text": new_text.strip(),
+                "is_edited": True,
+                "edited_at": now_iso()
+            }
+        }
+    )
+
+    edited_message, _ = find_message_by_id(message_id)
+
+    if edited_message is None:
+        raise HTTPException(status_code=500, detail="수정된 메시지를 불러오지 못했습니다.")
+
+    return edited_message
+
+
 def delete_message_service(message_id: str, requester_uuid: str):
     msg, _ = find_message_by_id(message_id)
 
