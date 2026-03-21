@@ -220,4 +220,9 @@ def delete_message_service(message_id: str, requester_uuid: str):
         }
     )
 
-    return {"message": "메시지가 삭제 처리되었습니다."}
+    deleted_message, _ = find_message_by_id(message_id)
+
+    if deleted_message is None:
+        raise HTTPException(status_code=500, detail="삭제된 메시지를 불러오지 못했습니다.")
+
+    return deleted_message

@@ -73,8 +73,22 @@ def list_messages(
 
 
 @router.delete("/messages/{message_id}")
-def delete_message(
+async def delete_message(
     message_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    return delete_message_service(message_id, current_user["user_uuid"])
+    deleted_message = delete_message_service(message_id, current_user["user_uuid"])
+
+    await manager.broadcast(
+        deleted_message["room_id"],
+        {
+            "type": "message_deleted",
+            "data": deleted_message,
+            "user_uuid": current_user["user_uuid"],
+        },
+    )
+
+    return {
+        "message": "메시지가 삭제 처리되었습니다.",
+        "data": deleted_message,
+    }
