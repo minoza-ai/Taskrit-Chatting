@@ -3,7 +3,7 @@ import uuid
 from typing import Optional
 from fastapi import HTTPException
 
-from app.database import messages_collection
+from app.database import messages_collection, read_status_collection
 from app.services.room_service import get_room, room_exists
 from app.config import UPLOAD_DIR
 from app.utils.common import now_iso
@@ -59,7 +59,69 @@ def send_message_service(room_id: str, sender_uuid: str, text: str):
 
     messages_collection.insert_one(msg)
 
+    # New message is unread for all other members until they mark room as read.
+    msg["unread_member_count"] = max(len(room["members"]) - 1, 0)
+
     return serialize_doc(msg)
+
+
+def _get_last_read_seq_map(room_id: str) -> dict[str, int]:
+    docs = list(
+        read_status_collection.find(
+            {"room_id": room_id},
+            {"_id": 0, "user_uuid": 1, "last_read_message_id": 1},
+        )
+    )
+
+    message_ids = [doc.get("last_read_message_id") for doc in docs if doc.get("last_read_message_id")]
+    if not message_ids:
+        return {}
+
+    read_messages = list(
+        messages_collection.find(
+            {
+                "room_id": room_id,
+                "message_id": {"$in": message_ids},
+            },
+            {"_id": 0, "message_id": 1, "seq": 1},
+        )
+    )
+
+    seq_by_message_id = {msg["message_id"]: int(msg["seq"]) for msg in read_messages}
+
+    last_read_seq_by_user: dict[str, int] = {}
+    for doc in docs:
+        user_uuid = doc.get("user_uuid")
+        last_read_message_id = doc.get("last_read_message_id")
+        if not user_uuid or not last_read_message_id:
+            continue
+        last_read_seq_by_user[user_uuid] = seq_by_message_id.get(last_read_message_id, 0)
+
+    return last_read_seq_by_user
+
+
+def _attach_unread_member_count(room: dict, messages: list[dict]) -> list[dict]:
+    if not messages:
+        return messages
+
+    members = room.get("members", [])
+    last_read_seq_by_user = _get_last_read_seq_map(room["room_id"])
+
+    for message in messages:
+        unread_member_count = 0
+        message_seq = int(message.get("seq", 0))
+        sender_uuid = message.get("sender_uuid")
+
+        for member_uuid in members:
+            if member_uuid == sender_uuid:
+                continue
+
+            if last_read_seq_by_user.get(member_uuid, 0) < message_seq:
+                unread_member_count += 1
+
+        message["unread_member_count"] = unread_member_count
+
+    return messages
 
 
 def list_messages_service(
@@ -68,7 +130,8 @@ def list_messages_service(
     before: Optional[str] = None,
     after: Optional[str] = None
 ):
-    if not room_exists(room_id):
+    room = get_room(room_id)
+    if not room:
         raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
     if limit <= 0:
@@ -85,7 +148,7 @@ def list_messages_service(
             ).sort("seq", -1).limit(limit)
         )
         result.reverse()
-        return result
+        return _attach_unread_member_count(room, result)
 
     if before:
         target_msg = messages_collection.find_one(
@@ -105,7 +168,7 @@ def list_messages_service(
             ).sort("seq", -1).limit(limit)
         )
         result.reverse()
-        return result
+        return _attach_unread_member_count(room, result)
 
     target_msg = messages_collection.find_one(
         {"message_id": after, "room_id": room_id},
@@ -124,7 +187,7 @@ def list_messages_service(
         ).sort("seq", 1).limit(limit)
     )
 
-    return result
+    return _attach_unread_member_count(room, result)
 
 
 def delete_message_service(message_id: str, requester_uuid: str):

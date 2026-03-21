@@ -6,22 +6,36 @@ from app.services.read_service import (
     mark_room_as_read_service,
     get_read_status_service,
 )
+from app.websocket.manager import manager
 
 router = APIRouter(tags=["reads"])
 
 
 @router.post("/rooms/{room_id}/read")
-def mark_room_as_read(
+async def mark_room_as_read(
     room_id: str,
     body: ReadMessageRequest,
     auth: dict = Depends(validate_room_member),
 ):
     current_user = auth["current_user"]
-    return mark_room_as_read_service(
+    result = mark_room_as_read_service(
         room_id,
         current_user["user_uuid"],
         body.last_read_message_id,
     )
+
+    await manager.broadcast(
+        room_id,
+        {
+            "type": "read_update",
+            "room_id": room_id,
+            "user_uuid": current_user["user_uuid"],
+            "last_read_message_id": result["last_read_message_id"],
+            "last_read_seq": result["last_read_seq"],
+        },
+    )
+
+    return result
 
 
 @router.get("/rooms/{room_id}/read-status")

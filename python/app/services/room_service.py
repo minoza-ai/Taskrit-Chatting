@@ -137,15 +137,22 @@ def list_user_rooms_service(user_uuid: str):
                     {
                         "room_id": room_id,
                         "seq": {"$gt": last_read_message["seq"]},
+                        "sender_uuid": {"$ne": user_uuid},
                     }
                 )
             else:
                 room["unread_count"] = messages_collection.count_documents(
-                    {"room_id": room_id}
+                    {
+                        "room_id": room_id,
+                        "sender_uuid": {"$ne": user_uuid},
+                    }
                 )
         else:
             room["unread_count"] = messages_collection.count_documents(
-                {"room_id": room_id}
+                {
+                    "room_id": room_id,
+                    "sender_uuid": {"$ne": user_uuid},
+                }
             )
 
         enriched_rooms.append(room)

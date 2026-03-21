@@ -15,7 +15,7 @@ def mark_room_as_read_service(room_id: str, user_uuid: str, last_read_message_id
 
     target_msg = messages_collection.find_one(
         {"message_id": last_read_message_id, "room_id": room_id},
-        {"_id": 1}
+        {"_id": 0, "seq": 1}
     )
     if not target_msg:
         raise HTTPException(status_code=404, detail="last_read_message_id에 해당하는 메시지가 없습니다.")
@@ -35,7 +35,8 @@ def mark_room_as_read_service(room_id: str, user_uuid: str, last_read_message_id
         "message": "읽음 상태가 업데이트되었습니다.",
         "room_id": room_id,
         "user_uuid": user_uuid,
-        "last_read_message_id": last_read_message_id
+        "last_read_message_id": last_read_message_id,
+        "last_read_seq": int(target_msg["seq"]),
     }
 
 
