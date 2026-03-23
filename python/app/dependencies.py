@@ -35,12 +35,14 @@ def fetch_current_user_by_token(token: str) -> dict:
                 "user_uuid": user_doc["user_uuid"],
                 "user_id": user_doc["user_id"],
                 "nickname": user_doc["nickname"],
+                "profile_image_url": user_doc.get("profile_image_url"),
             }
 
         return {
             "user_uuid": "550e8400-e29b-41d4-a716-446655440000",
             "user_id": "test",
             "nickname": "Tester",
+            "profile_image_url": None,
         }
 
     url = f"{USER_API_BASE_URL}{USER_ME_ENDPOINT}"

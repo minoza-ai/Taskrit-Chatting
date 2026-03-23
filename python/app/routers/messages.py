@@ -54,6 +54,7 @@ async def send_message(
                         "message_id": saved_message["message_id"],
                         "text": saved_message["text"],
                         "sender_uuid": current_user["user_uuid"],
+                        "sender_profile_image": current_user.get("profile_image_url"),
                         "created_at": saved_message["created_at"],
                     },
                 },

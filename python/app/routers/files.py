@@ -59,6 +59,7 @@ async def upload_file_to_room(
                       "message_id": saved_message["message_id"],
                       "text": "파일을 보냈습니다.",
                       "sender_uuid": user_uuid,
+                      "sender_profile_image": current_user.get("profile_image_url"),
                       "created_at": saved_message["created_at"],
                       "message_type": "file",
                   },
