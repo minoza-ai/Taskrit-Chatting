@@ -86,6 +86,7 @@ def fetch_current_user_by_token(token: str) -> dict:
         user_uuid=user["user_uuid"],
         user_id=user["user_id"],
         nickname=user["nickname"],
+        wallet_address=user.get("wallet_address")
     )
 
     return user
