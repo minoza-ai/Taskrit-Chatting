@@ -548,6 +548,16 @@
             }
           },
           {
+            "name": "optimize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Optimize"
+            }
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
