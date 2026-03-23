@@ -14,7 +14,7 @@ def get_all_users():
     return list(users_collection.find({}, {"_id": 0}))
 
 
-def upsert_user(user_uuid: str, user_id: str, nickname: str, wallet_address: str = None):
+def upsert_user(user_uuid: str, user_id: str, nickname: str, wallet_address: str = None, profile_image_url: str = None):
     update_data = {
         "user_uuid": user_uuid,
         "user_id": user_id,
@@ -22,6 +22,9 @@ def upsert_user(user_uuid: str, user_id: str, nickname: str, wallet_address: str
     }
     if wallet_address:
         update_data["wallet_address"] = wallet_address
+    
+    if profile_image_url:
+         update_data["profile_image_url"] = profile_image_url
 
     users_collection.update_one(
         {"user_uuid": user_uuid},
