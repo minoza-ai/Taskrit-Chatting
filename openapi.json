@@ -948,6 +948,17 @@
           "text": {
             "type": "string",
             "title": "Text"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
           }
         },
         "type": "object",
