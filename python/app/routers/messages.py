@@ -22,7 +22,7 @@ async def send_message(
     auth: dict = Depends(validate_room_member),
 ):
     current_user = auth["current_user"]
-    saved_message = send_message_service(room_id, current_user["user_uuid"], body.text)
+    saved_message = send_message_service(room_id, current_user["user_uuid"], body.text, body.parent_id)
     room = get_room(room_id)
 
     # REST 전송도 WebSocket 구독자에게 동일 이벤트를 push 해야 실시간 동기화된다.

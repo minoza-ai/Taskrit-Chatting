@@ -12,6 +12,7 @@ router = APIRouter(tags=["websocket"])
 class WSChatMessage(BaseModel):
     type: str
     text: str | None = None
+    parent_id: str | None = None
 
 
 @router.websocket("/ws/notifications")

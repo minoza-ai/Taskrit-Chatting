@@ -31,7 +31,7 @@ def get_next_seq(room_id: str) -> int:
     return next_seq
 
 
-def send_message_service(room_id: str, sender_uuid: str, text: str):
+def send_message_service(room_id: str, sender_uuid: str, text: str, parent_id: Optional[str] = None):
     room = get_room(room_id)
 
     if not room:
@@ -42,6 +42,22 @@ def send_message_service(room_id: str, sender_uuid: str, text: str):
 
     if text is None or not str(text).strip():
         raise HTTPException(status_code=400, detail="메시지 내용은 비어 있을 수 없습니다.")
+
+    parent_message = None
+    if parent_id:
+        parent_msg = messages_collection.find_one({"message_id": parent_id})
+        if parent_msg:
+            # We don't want to nested deeply, just store some basic info about parent
+            from app.database import users_collection
+            parent_sender = users_collection.find_one({"user_uuid": parent_msg["sender_uuid"]})
+            parent_sender_name = parent_sender.get("nickname", "알 수 없음") if parent_sender else "알 수 없음"
+            parent_message = {
+                "message_id": parent_msg["message_id"],
+                "text": parent_msg["text"],
+                "sender_uuid": parent_msg["sender_uuid"],
+                "sender_name": parent_sender_name,
+                "is_deleted": parent_msg.get("is_deleted", False)
+            }
 
     msg = {
         "message_id": str(uuid.uuid4()),
@@ -54,6 +70,8 @@ def send_message_service(room_id: str, sender_uuid: str, text: str):
         "file_name": None,
         "saved_filename": None,
         "file_url": None,
+        "parent_id": parent_id,
+        "parent_message": parent_message,
         "created_at": now_iso()
     }
 
