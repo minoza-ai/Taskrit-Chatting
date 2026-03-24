@@ -51,12 +51,18 @@ jobs:
 
       - name: Commit openapi.json if changed
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Rebase onto the latest remote main to avoid non-fast-forward push errors on reruns.
+          git fetch origin main
+          git rebase origin/main
+
           git add openapi.json
           git diff --cached --quiet && echo "No OpenAPI changes" && exit 0
           git commit -m "chore: update chat openapi spec"
-          git push
+          git push origin HEAD:main
 
   build-and-push:
     runs-on: ubuntu-latest
