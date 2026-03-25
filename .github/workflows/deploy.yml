@@ -172,6 +172,7 @@ jobs:
               --name "${{ env.CONTAINER_NAME }}" \
               --network "taskrit-network" \
               --restart unless-stopped \
+              -e TZ=Asia/Seoul \
               -e NODE_ENV=production \
               -e MONGODB_USER="${{ secrets.MONGODB_USER }}" \
               -e MONGODB_PASSWORD="${{ secrets.MONGODB_PASSWORD }}" \
