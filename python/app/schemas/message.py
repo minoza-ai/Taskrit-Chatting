@@ -9,3 +9,7 @@ class SendMessageRequest(BaseModel):
 
 class EditMessageRequest(BaseModel):
     text: str
+
+
+class ToggleReactionRequest(BaseModel):
+    emoji: str

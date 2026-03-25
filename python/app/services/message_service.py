@@ -70,6 +70,7 @@ def send_message_service(room_id: str, sender_uuid: str, text: str, parent_id: O
         "file_name": None,
         "saved_filename": None,
         "file_url": None,
+        "reactions": {},
         "parent_id": parent_id,
         "parent_message": parent_message,
         "created_at": now_iso()
@@ -281,3 +282,58 @@ def delete_message_service(message_id: str, requester_uuid: str):
         raise HTTPException(status_code=500, detail="삭제된 메시지를 불러오지 못했습니다.")
 
     return deleted_message
+
+
+def toggle_message_reaction_service(message_id: str, emoji: str, requester_uuid: str):
+    msg = messages_collection.find_one({"message_id": message_id})
+    if not msg:
+        raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다.")
+
+    room_id = msg.get("room_id")
+    room = get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
+
+    if requester_uuid not in room.get("members", []):
+        raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
+
+    if msg.get("is_deleted") or msg.get("message_type") == "deleted":
+        raise HTTPException(status_code=400, detail="삭제된 메시지에는 반응할 수 없습니다.")
+
+    normalized_emoji = (emoji or "").strip()
+    if not normalized_emoji:
+        raise HTTPException(status_code=400, detail="emoji는 비어 있을 수 없습니다.")
+
+    if len(normalized_emoji) > 16:
+        raise HTTPException(status_code=400, detail="emoji가 너무 깁니다.")
+
+    current_reactions = msg.get("reactions") or {}
+    current_users = current_reactions.get(normalized_emoji, [])
+    has_reacted = requester_uuid in current_users
+
+    reaction_path = f"reactions.{normalized_emoji}"
+
+    if has_reacted:
+        messages_collection.update_one(
+            {"message_id": message_id},
+            {"$pull": {reaction_path: requester_uuid}},
+        )
+
+        updated_doc = messages_collection.find_one({"message_id": message_id}, {"_id": 0}) or {}
+        users_after_pull = (updated_doc.get("reactions") or {}).get(normalized_emoji, [])
+        if not users_after_pull:
+            messages_collection.update_one(
+                {"message_id": message_id},
+                {"$unset": {reaction_path: ""}},
+            )
+    else:
+        messages_collection.update_one(
+            {"message_id": message_id},
+            {"$addToSet": {reaction_path: requester_uuid}},
+        )
+
+    updated_message, _ = find_message_by_id(message_id)
+    if updated_message is None:
+        raise HTTPException(status_code=500, detail="반응 반영 후 메시지를 불러오지 못했습니다.")
+
+    return updated_message

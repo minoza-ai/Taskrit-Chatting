@@ -2,12 +2,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from app.dependencies import get_current_user, validate_room_member
-from app.schemas.message import SendMessageRequest, EditMessageRequest
+from app.schemas.message import SendMessageRequest, EditMessageRequest, ToggleReactionRequest
 from app.services.message_service import (
     send_message_service,
     list_messages_service,
     delete_message_service,
     edit_message_service,
+    toggle_message_reaction_service,
 )
 from app.websocket.manager import manager
 from app.services.room_service import get_room, get_dm_display_name_for_user
@@ -116,4 +117,27 @@ async def edit_message(
     return {
         "message": "메시지가 수정되었습니다.",
         "data": edited_message,
+    }
+
+
+@router.post("/messages/{message_id}/reactions")
+async def toggle_message_reaction(
+    message_id: str,
+    body: ToggleReactionRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    updated_message = toggle_message_reaction_service(message_id, body.emoji, current_user["user_uuid"])
+
+    await manager.broadcast(
+        updated_message["room_id"],
+        {
+            "type": "message_reaction_updated",
+            "data": updated_message,
+            "user_uuid": current_user["user_uuid"],
+        },
+    )
+
+    return {
+        "message": "메시지 반응이 업데이트되었습니다.",
+        "data": updated_message,
     }
