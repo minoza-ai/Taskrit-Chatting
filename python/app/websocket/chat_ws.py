@@ -182,7 +182,7 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                 )
                 continue
 
-            if payload.type in {"call_start", "call_end"}:
+            if payload.type in {"call_start", "call_end", "call_accept", "call_reject"}:
                 target_user_uuid = payload.target_user_uuid
 
                 if target_user_uuid:
@@ -204,6 +204,22 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                                 "target_user_uuid": target_user_uuid,
                             },
                         )
+
+                        if payload.type == "call_start":
+                            await manager.send_user_notification(
+                                target_user_uuid,
+                                {
+                                    "type": "notification",
+                                    "event": "incoming_call",
+                                    "room_id": room_id,
+                                    "room_name": get_dm_display_name_for_user(room, target_user_uuid),
+                                    "caller": {
+                                        "user_uuid": user_uuid,
+                                        "nickname": nickname,
+                                        "profile_image_url": current_user.get("profile_image_url"),
+                                    },
+                                },
+                            )
                 else:
                     await manager.broadcast(
                         room_id,
