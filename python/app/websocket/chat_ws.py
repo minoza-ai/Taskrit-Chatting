@@ -13,6 +13,9 @@ class WSChatMessage(BaseModel):
     type: str
     text: str | None = None
     parent_id: str | None = None
+    target_user_uuid: str | None = None
+    sdp: str | None = None
+    candidate: dict | None = None
 
 
 @router.websocket("/ws/notifications")
@@ -177,6 +180,94 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                     },
                     exclude_connection_id=connection_id,
                 )
+                continue
+
+            if payload.type in {"call_start", "call_end"}:
+                target_user_uuid = payload.target_user_uuid
+
+                if target_user_uuid:
+                    if target_user_uuid not in room["members"]:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "대상 사용자가 이 채팅방 멤버가 아닙니다.",
+                        })
+                        continue
+
+                    if target_user_uuid != user_uuid:
+                        await manager.broadcast_to_user(
+                            room_id,
+                            target_user_uuid,
+                            {
+                                "type": payload.type,
+                                "room_id": room_id,
+                                "sender_uuid": user_uuid,
+                                "target_user_uuid": target_user_uuid,
+                            },
+                        )
+                else:
+                    await manager.broadcast(
+                        room_id,
+                        {
+                            "type": payload.type,
+                            "room_id": room_id,
+                            "sender_uuid": user_uuid,
+                        },
+                        exclude_connection_id=connection_id,
+                    )
+
+                continue
+
+            if payload.type in {"webrtc_offer", "webrtc_answer", "webrtc_ice"}:
+                target_user_uuid = payload.target_user_uuid
+
+                if not target_user_uuid:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "target_user_uuid가 필요합니다.",
+                    })
+                    continue
+
+                if target_user_uuid not in room["members"]:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "대상 사용자가 이 채팅방 멤버가 아닙니다.",
+                    })
+                    continue
+
+                if target_user_uuid == user_uuid:
+                    continue
+
+                relay_payload = {
+                    "type": payload.type,
+                    "room_id": room_id,
+                    "sender_uuid": user_uuid,
+                    "target_user_uuid": target_user_uuid,
+                }
+
+                if payload.type in {"webrtc_offer", "webrtc_answer"}:
+                    if not payload.sdp:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "sdp가 필요합니다.",
+                        })
+                        continue
+                    relay_payload["sdp"] = payload.sdp
+
+                if payload.type == "webrtc_ice":
+                    if not payload.candidate:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "candidate가 필요합니다.",
+                        })
+                        continue
+                    relay_payload["candidate"] = payload.candidate
+
+                await manager.broadcast_to_user(
+                    room_id,
+                    target_user_uuid,
+                    relay_payload,
+                )
+
                 continue
 
             if payload.type == "message":
