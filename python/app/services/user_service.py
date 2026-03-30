@@ -6,8 +6,39 @@ def find_user_by_uuid(user_uuid: str):
     return serialize_doc(users_collection.find_one({"user_uuid": user_uuid}))
 
 
+def find_user_by_user_id(user_id: str):
+    return serialize_doc(users_collection.find_one({"user_id": user_id}))
+
+
 def user_exists(user_uuid: str) -> bool:
     return users_collection.find_one({"user_uuid": user_uuid}, {"_id": 1}) is not None
+
+
+def resolve_user_uuid(identifier: str | None) -> str | None:
+    if not identifier:
+        return None
+
+    user_by_uuid = users_collection.find_one({"user_uuid": identifier}, {"_id": 0, "user_uuid": 1})
+    if user_by_uuid:
+        return user_by_uuid["user_uuid"]
+
+    user_by_user_id = users_collection.find_one({"user_id": identifier}, {"_id": 0, "user_uuid": 1})
+    if user_by_user_id:
+        return user_by_user_id["user_uuid"]
+
+    return None
+
+
+def get_user_identifiers_by_uuid(user_uuid: str) -> list[str]:
+    user = users_collection.find_one({"user_uuid": user_uuid}, {"_id": 0, "user_uuid": 1, "user_id": 1})
+    if not user:
+        return [user_uuid]
+
+    identifiers = [user_uuid]
+    user_id = user.get("user_id")
+    if user_id:
+        identifiers.append(user_id)
+    return identifiers
 
 
 def get_all_users():

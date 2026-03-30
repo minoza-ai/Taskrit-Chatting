@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import HTTPException
 
 from app.database import messages_collection, read_status_collection
-from app.services.room_service import get_room, room_exists
+from app.services.room_service import get_room, room_exists, is_room_member, get_room_member_uuids
 from app.config import UPLOAD_DIR
 from app.utils.common import now_iso
 from app.utils.serializers import serialize_doc
@@ -37,7 +37,7 @@ def send_message_service(room_id: str, sender_uuid: str, text: str, parent_id: O
     if not room:
         raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
-    if sender_uuid not in room["members"]:
+    if not is_room_member(room, sender_uuid):
         raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
     if text is None or not str(text).strip():
@@ -79,7 +79,7 @@ def send_message_service(room_id: str, sender_uuid: str, text: str, parent_id: O
     messages_collection.insert_one(msg)
 
     # New message is unread for all other members until they mark room as read.
-    msg["unread_member_count"] = max(len(room["members"]) - 1, 0)
+    msg["unread_member_count"] = max(len(get_room_member_uuids(room)) - 1, 0)
 
     return serialize_doc(msg)
 
@@ -123,7 +123,7 @@ def _attach_unread_member_count(room: dict, messages: list[dict]) -> list[dict]:
     if not messages:
         return messages
 
-    members = room.get("members", [])
+    members = get_room_member_uuids(room)
     last_read_seq_by_user = _get_last_read_seq_map(room["room_id"])
 
     for message in messages:
@@ -294,7 +294,7 @@ def toggle_message_reaction_service(message_id: str, emoji: str, requester_uuid:
     if not room:
         raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
-    if requester_uuid not in room.get("members", []):
+    if not is_room_member(room, requester_uuid):
         raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
     if msg.get("is_deleted") or msg.get("message_type") == "deleted":

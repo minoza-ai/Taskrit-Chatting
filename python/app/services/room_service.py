@@ -2,7 +2,7 @@ import uuid
 from fastapi import HTTPException
 
 from app.database import rooms_collection, messages_collection, read_status_collection
-from app.services.user_service import user_exists, find_user_by_uuid
+from app.services.user_service import user_exists, find_user_by_uuid, resolve_user_uuid, get_user_identifiers_by_uuid
 from app.utils.common import now_iso, make_dm_key
 from app.utils.serializers import serialize_doc
 
@@ -15,6 +15,27 @@ def get_room(room_id: str):
     return serialize_doc(rooms_collection.find_one({"room_id": room_id}))
 
 
+def normalize_room_member_uuid(member_identifier: str | None) -> str | None:
+    return resolve_user_uuid(member_identifier)
+
+
+def get_room_member_uuids(room: dict | None) -> list[str]:
+    if not room:
+        return []
+
+    normalized_member_uuids: list[str] = []
+    for member_identifier in room.get("members", []):
+        resolved_uuid = normalize_room_member_uuid(member_identifier)
+        if resolved_uuid and resolved_uuid not in normalized_member_uuids:
+            normalized_member_uuids.append(resolved_uuid)
+
+    return normalized_member_uuids
+
+
+def is_room_member(room: dict | None, user_uuid: str) -> bool:
+    return user_uuid in get_room_member_uuids(room)
+
+
 def create_dm_room_service(current_user_uuid: str, body):
     if not body.room_name.strip():
         raise HTTPException(status_code=400, detail="room_name은 비어 있을 수 없습니다.")
@@ -25,10 +46,11 @@ def create_dm_room_service(current_user_uuid: str, body):
     if not user_exists(current_user_uuid):
         raise HTTPException(status_code=404, detail="현재 사용자가 존재하지 않습니다.")
 
-    if not user_exists(body.target_user_uuid):
+    target_user_uuid = resolve_user_uuid(body.target_user_uuid)
+    if not target_user_uuid:
         raise HTTPException(status_code=404, detail=f"{body.target_user_uuid} 사용자가 존재하지 않습니다.")
 
-    dm_key = make_dm_key(current_user_uuid, body.target_user_uuid)
+    dm_key = make_dm_key(current_user_uuid, target_user_uuid)
 
     existing_room = rooms_collection.find_one(
         {"room_type": "dm", "dm_key": dm_key},
@@ -42,7 +64,7 @@ def create_dm_room_service(current_user_uuid: str, body):
         "room_type": "dm",
         "room_name": body.room_name,
         "dm_key": dm_key,
-        "members": [current_user_uuid, body.target_user_uuid],
+        "members": [current_user_uuid, target_user_uuid],
         "created_at": now_iso(),
         "created_by": current_user_uuid
     }
@@ -58,7 +80,13 @@ def create_team_room_service(current_user_uuid: str, body):
     if not user_exists(current_user_uuid):
         raise HTTPException(status_code=404, detail="현재 사용자가 존재하지 않습니다.")
 
-    unique_members = list(dict.fromkeys(body.members))
+    normalized_members: list[str] = []
+    for member_identifier in body.members:
+        resolved_uuid = resolve_user_uuid(member_identifier)
+        if resolved_uuid and resolved_uuid not in normalized_members:
+            normalized_members.append(resolved_uuid)
+
+    unique_members = list(dict.fromkeys(normalized_members))
     if current_user_uuid not in unique_members:
         unique_members.insert(0, current_user_uuid)
 
@@ -86,9 +114,11 @@ def list_user_rooms_service(user_uuid: str):
     if not user_exists(user_uuid):
         raise HTTPException(status_code=404, detail="사용자가 존재하지 않습니다.")
 
+    user_identifiers = get_user_identifiers_by_uuid(user_uuid)
+
     rooms = list(
         rooms_collection.find(
-            {"members": user_uuid},
+            {"members": {"$in": user_identifiers}},
             {"_id": 0}
         ).sort("created_at", -1)
     )
@@ -176,14 +206,15 @@ def create_team_from_existing_room_service(room_id: str, current_user_uuid: str,
     if not body.room_name.strip():
         raise HTTPException(status_code=400, detail="새 팀방 이름(room_name)은 비어 있을 수 없습니다.")
 
-    if current_user_uuid not in base_room["members"]:
+    if not is_room_member(base_room, current_user_uuid):
         raise HTTPException(status_code=403, detail="초대하는 사용자는 기존 채팅방 멤버여야 합니다.")
 
-    new_members = list(base_room["members"])
+    new_members = get_room_member_uuids(base_room)
 
-    for new_member_uuid in body.new_members:
-        if not user_exists(new_member_uuid):
-            raise HTTPException(status_code=404, detail=f"{new_member_uuid} 사용자가 존재하지 않습니다.")
+    for new_member_identifier in body.new_members:
+        new_member_uuid = resolve_user_uuid(new_member_identifier)
+        if not new_member_uuid:
+            raise HTTPException(status_code=404, detail=f"{new_member_identifier} 사용자가 존재하지 않습니다.")
         if new_member_uuid not in new_members:
             new_members.append(new_member_uuid)
 
@@ -215,7 +246,7 @@ def get_dm_display_name_for_user(room: dict, current_user_uuid: str):
         return room.get("room_name") or "채팅방"
 
     # DM 방인 경우, 상대방의 UUID 찾기
-    members = room.get("members", [])
+    members = get_room_member_uuids(room)
     other_user_uuid = None
 
     for member_uuid in members:

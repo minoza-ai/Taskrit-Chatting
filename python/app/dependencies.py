@@ -2,7 +2,7 @@ import requests
 from fastapi import Depends, Header, HTTPException
 
 from app.config import USER_API_BASE_URL, USER_ME_ENDPOINT
-from app.services.room_service import get_room
+from app.services.room_service import get_room, is_room_member
 
 
 def get_bearer_token(authorization: str | None = Header(default=None)) -> str:
@@ -109,7 +109,7 @@ def validate_room_member(
     if not room:
         raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
-    if current_user["user_uuid"] not in room["members"]:
+    if not is_room_member(room, current_user["user_uuid"]):
         raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
     return {

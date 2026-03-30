@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
 
 from app.dependencies import fetch_current_user_by_token
-from app.services.room_service import get_room, get_dm_display_name_for_user
+from app.services.room_service import get_room, get_dm_display_name_for_user, is_room_member, get_room_member_uuids
 from app.services.message_service import send_message_service, list_messages_service
 from app.websocket.manager import manager
 
@@ -93,7 +93,7 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
             await websocket.close(code=4404)
             return
 
-        if user_uuid not in room["members"]:
+        if not is_room_member(room, user_uuid):
             await websocket.send_json({
                 "type": "error",
                 "message": "이 사용자는 해당 채팅방 멤버가 아닙니다."
@@ -186,7 +186,7 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                 target_user_uuid = payload.target_user_uuid
 
                 if target_user_uuid:
-                    if target_user_uuid not in room["members"]:
+                    if target_user_uuid not in get_room_member_uuids(room):
                         await websocket.send_json({
                             "type": "error",
                             "message": "대상 사용자가 이 채팅방 멤버가 아닙니다.",
@@ -243,7 +243,7 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                     })
                     continue
 
-                if target_user_uuid not in room["members"]:
+                if target_user_uuid not in get_room_member_uuids(room):
                     await websocket.send_json({
                         "type": "error",
                         "message": "대상 사용자가 이 채팅방 멤버가 아닙니다.",
@@ -312,7 +312,7 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                     },
                 )
 
-                for member_uuid in room["members"]:
+                for member_uuid in get_room_member_uuids(room):
                     if member_uuid == user_uuid:
                         continue
 

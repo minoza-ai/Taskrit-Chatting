@@ -11,7 +11,7 @@ from app.services.message_service import (
     toggle_message_reaction_service,
 )
 from app.websocket.manager import manager
-from app.services.room_service import get_room, get_dm_display_name_for_user
+from app.services.room_service import get_room, get_dm_display_name_for_user, get_room_member_uuids
 
 router = APIRouter(tags=["messages"])
 
@@ -40,7 +40,7 @@ async def send_message(
     )
 
     if room:
-        for member_uuid in room["members"]:
+        for member_uuid in get_room_member_uuids(room):
             if member_uuid == current_user["user_uuid"]:
                 continue
 
