@@ -272,6 +272,31 @@ def add_members_to_room_service(room_id: str, current_user_uuid: str, body):
     return get_room(room_id)
 
 
+def update_room_name_service(room_id: str, current_user_uuid: str, body):
+    room = get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
+
+    if not user_exists(current_user_uuid):
+        raise HTTPException(status_code=404, detail="현재 사용자가 존재하지 않습니다.")
+
+    if not is_room_member(room, current_user_uuid):
+        raise HTTPException(status_code=403, detail="채팅방 멤버만 이름을 변경할 수 있습니다.")
+
+    if room.get("room_type") != "team":
+        raise HTTPException(status_code=400, detail="단체 채팅방만 이름 변경이 가능합니다.")
+
+    next_name = (body.room_name or "").strip()
+    if not next_name:
+        raise HTTPException(status_code=400, detail="room_name은 비어 있을 수 없습니다.")
+
+    rooms_collection.update_one(
+        {"room_id": room_id},
+        {"$set": {"room_name": next_name}},
+    )
+    return get_room(room_id)
+
+
 def get_dm_display_name_for_user(room: dict, current_user_uuid: str):
     """
     DM방에서 현재 사용자 관점의 표시될 이름을 반환합니다.

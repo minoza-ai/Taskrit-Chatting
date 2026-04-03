@@ -6,6 +6,7 @@ from app.schemas.room import (
     CreateDMRoomRequest,
     CreateTeamRoomRequest,
     CreateTeamFromRoomRequest,
+    UpdateRoomNameRequest,
 )
 from app.services.room_service import (
     add_members_to_room_service,
@@ -13,6 +14,7 @@ from app.services.room_service import (
     create_team_room_service,
     create_team_from_existing_room_service,
     list_user_rooms_service,
+    update_room_name_service,
 )
 
 router = APIRouter(tags=["rooms"])
@@ -52,6 +54,16 @@ def add_members_to_room(
 ):
     current_user = auth["current_user"]
     return add_members_to_room_service(room_id, current_user["user_uuid"], body)
+
+
+@router.patch("/rooms/{room_id}/name")
+def update_room_name(
+    room_id: str,
+    body: UpdateRoomNameRequest,
+    auth: dict = Depends(validate_room_member),
+):
+    current_user = auth["current_user"]
+    return update_room_name_service(room_id, current_user["user_uuid"], body)
 
 
 @router.get("/users/me/rooms")
