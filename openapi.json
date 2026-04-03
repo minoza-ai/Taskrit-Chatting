@@ -201,6 +201,138 @@
         }
       }
     },
+    "/rooms/{room_id}/members": {
+      "post": {
+        "tags": [
+          "rooms"
+        ],
+        "summary": "Add Members To Room",
+        "operationId": "add_members_to_room_rooms__room_id__members_post",
+        "parameters": [
+          {
+            "name": "room_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Room Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRoomMembersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rooms/{room_id}/name": {
+      "patch": {
+        "tags": [
+          "rooms"
+        ],
+        "summary": "Update Room Name",
+        "operationId": "update_room_name_rooms__room_id__name_patch",
+        "parameters": [
+          {
+            "name": "room_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Room Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRoomNameRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/users/me/rooms": {
       "get": {
         "tags": [
@@ -530,6 +662,72 @@
         }
       }
     },
+    "/messages/{message_id}/reactions": {
+      "post": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Toggle Message Reaction",
+        "operationId": "toggle_message_reaction_messages__message_id__reactions_post",
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToggleReactionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/rooms/{room_id}/files": {
       "post": {
         "tags": [
@@ -830,6 +1028,22 @@
   },
   "components": {
     "schemas": {
+      "AddRoomMembersRequest": {
+        "properties": {
+          "new_members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "New Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_members"
+        ],
+        "title": "AddRoomMembersRequest"
+      },
       "Body_upload_file_to_room_rooms__room_id__files_post": {
         "properties": {
           "file": {
@@ -966,6 +1180,32 @@
           "text"
         ],
         "title": "SendMessageRequest"
+      },
+      "ToggleReactionRequest": {
+        "properties": {
+          "emoji": {
+            "type": "string",
+            "title": "Emoji"
+          }
+        },
+        "type": "object",
+        "required": [
+          "emoji"
+        ],
+        "title": "ToggleReactionRequest"
+      },
+      "UpdateRoomNameRequest": {
+        "properties": {
+          "room_name": {
+            "type": "string",
+            "title": "Room Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "room_name"
+        ],
+        "title": "UpdateRoomNameRequest"
       },
       "ValidationError": {
         "properties": {
