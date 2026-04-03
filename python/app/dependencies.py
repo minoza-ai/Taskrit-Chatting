@@ -5,6 +5,30 @@ from app.config import USER_API_BASE_URL, USER_ME_ENDPOINT
 from app.services.room_service import get_room, is_room_member
 
 
+def _candidate_user_api_bases(base_url: str) -> list[str]:
+    normalized = (base_url or "").strip().rstrip("/")
+    candidates: list[str] = []
+
+    def add_candidate(url: str) -> None:
+        if not url:
+            return
+        if url not in candidates:
+            candidates.append(url)
+
+    add_candidate(normalized)
+
+    if normalized.endswith("/api"):
+        add_candidate(normalized[:-4])
+    elif normalized:
+        add_candidate(f"{normalized}/api")
+
+    # Internal Docker network fallback for production deploys.
+    add_candidate("http://taskrit-backend:3000")
+    add_candidate("http://taskrit-backend:3000/api")
+
+    return candidates
+
+
 def get_bearer_token(authorization: str | None = Header(default=None)) -> str:
 
     if not authorization:
@@ -45,28 +69,43 @@ def fetch_current_user_by_token(token: str) -> dict:
             "profile_image_url": None,
         }
 
-    url = f"{USER_API_BASE_URL}{USER_ME_ENDPOINT}"
+    endpoint = USER_ME_ENDPOINT if USER_ME_ENDPOINT.startswith("/") else f"/{USER_ME_ENDPOINT}"
 
-    try:
-        response = requests.get(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=5,
-        )
-    except requests.RequestException:
-        raise HTTPException(status_code=503, detail="인증 서비스에 연결할 수 없습니다.")
+    response = None
+    last_request_error = None
+    last_non_404_status: int | None = None
 
-    if response.status_code == 401:
-        raise HTTPException(status_code=401, detail="유효하지 않은 access token입니다.")
+    for base in _candidate_user_api_bases(USER_API_BASE_URL):
+        url = f"{base}{endpoint}"
+        try:
+            response = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=5,
+            )
+        except requests.RequestException as req_error:
+            last_request_error = req_error
+            continue
 
-    if response.status_code == 404:
+        if response.status_code == 200:
+            break
+
+        if response.status_code == 401:
+            raise HTTPException(status_code=401, detail="유효하지 않은 access token입니다.")
+
+        if response.status_code != 404:
+            last_non_404_status = response.status_code
+    else:
+        if last_non_404_status is not None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"인증 서비스 응답 오류: {last_non_404_status}",
+            )
+
+        if last_request_error is not None:
+            raise HTTPException(status_code=503, detail="인증 서비스에 연결할 수 없습니다.")
+
         raise HTTPException(status_code=404, detail="사용자 정보를 찾을 수 없습니다.")
-
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=503,
-            detail=f"인증 서비스 응답 오류: {response.status_code}",
-        )
 
     try:
         user = response.json()
