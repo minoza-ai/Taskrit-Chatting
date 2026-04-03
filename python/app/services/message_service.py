@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from app.database import messages_collection, read_status_collection
 from app.services.room_service import get_room, room_exists, is_room_member, get_room_member_uuids
+from app.services.user_service import resolve_user_uuid
 from app.config import UPLOAD_DIR
 from app.utils.common import now_iso
 from app.utils.serializers import serialize_doc
@@ -110,11 +111,18 @@ def _get_last_read_seq_map(room_id: str) -> dict[str, int]:
 
     last_read_seq_by_user: dict[str, int] = {}
     for doc in docs:
-        user_uuid = doc.get("user_uuid")
+        raw_user_identifier = doc.get("user_uuid")
+        user_uuid = resolve_user_uuid(raw_user_identifier) or raw_user_identifier
         last_read_message_id = doc.get("last_read_message_id")
         if not user_uuid or not last_read_message_id:
             continue
-        last_read_seq_by_user[user_uuid] = seq_by_message_id.get(last_read_message_id, 0)
+        resolved_seq = seq_by_message_id.get(last_read_message_id, 0)
+        if resolved_seq <= 0:
+            continue
+
+        # Keep the furthest read position when duplicated docs exist (legacy user_id + user_uuid).
+        if resolved_seq > last_read_seq_by_user.get(user_uuid, 0):
+            last_read_seq_by_user[user_uuid] = resolved_seq
 
     return last_read_seq_by_user
 

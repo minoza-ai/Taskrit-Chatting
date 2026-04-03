@@ -1,7 +1,8 @@
 from fastapi import HTTPException
 
 from app.database import messages_collection, read_status_collection
-from app.services.room_service import get_room, room_exists
+from app.services.room_service import get_room, room_exists, is_room_member
+from app.services.user_service import resolve_user_uuid
 from app.utils.common import now_iso
 
 
@@ -10,7 +11,8 @@ def mark_room_as_read_service(room_id: str, user_uuid: str, last_read_message_id
     if not room:
         raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
 
-    if user_uuid not in room["members"]:
+    # Legacy rooms can contain user_id identifiers, so always validate via normalized membership.
+    if not is_room_member(room, user_uuid):
         raise HTTPException(status_code=403, detail="이 사용자는 해당 채팅방 멤버가 아닙니다.")
 
     target_msg = messages_collection.find_one(
@@ -74,6 +76,9 @@ def get_read_status_service(room_id: str):
 
     result = {}
     for doc in docs:
-        result[doc["user_uuid"]] = doc["last_read_message_id"]
+        normalized_user_uuid = resolve_user_uuid(doc.get("user_uuid")) or doc.get("user_uuid")
+        if not normalized_user_uuid:
+            continue
+        result[normalized_user_uuid] = doc.get("last_read_message_id")
 
     return result
