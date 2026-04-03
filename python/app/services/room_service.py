@@ -235,6 +235,43 @@ def create_team_from_existing_room_service(room_id: str, current_user_uuid: str,
     return serialize_doc(new_room)
 
 
+def add_members_to_room_service(room_id: str, current_user_uuid: str, body):
+    room = get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
+
+    if not user_exists(current_user_uuid):
+        raise HTTPException(status_code=404, detail="현재 사용자가 존재하지 않습니다.")
+
+    if not is_room_member(room, current_user_uuid):
+        raise HTTPException(status_code=403, detail="초대하는 사용자는 해당 채팅방의 멤버여야 합니다.")
+
+    merged_members = get_room_member_uuids(room)
+    added_count = 0
+
+    for member_identifier in body.new_members:
+        resolved_uuid = resolve_user_uuid(member_identifier)
+        if not resolved_uuid:
+            raise HTTPException(status_code=404, detail=f"{member_identifier} 사용자가 존재하지 않습니다.")
+        if resolved_uuid not in merged_members:
+            merged_members.append(resolved_uuid)
+            added_count += 1
+
+    if added_count == 0:
+        return room
+
+    update_doc = {
+        "members": merged_members,
+    }
+
+    # DM에 멤버를 추가하면 팀 채팅방으로 승격한다.
+    if len(merged_members) > 2:
+        update_doc["room_type"] = "team"
+
+    rooms_collection.update_one({"room_id": room_id}, {"$set": update_doc})
+    return get_room(room_id)
+
+
 def get_dm_display_name_for_user(room: dict, current_user_uuid: str):
     """
     DM방에서 현재 사용자 관점의 표시될 이름을 반환합니다.

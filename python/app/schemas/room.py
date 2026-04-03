@@ -15,3 +15,7 @@ class CreateTeamRoomRequest(BaseModel):
 class CreateTeamFromRoomRequest(BaseModel):
     room_name: str
     new_members: List[str]
+
+
+class AddRoomMembersRequest(BaseModel):
+    new_members: List[str]

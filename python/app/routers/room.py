@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends
 
 from app.dependencies import get_current_user, validate_room_member
 from app.schemas.room import (
+    AddRoomMembersRequest,
     CreateDMRoomRequest,
     CreateTeamRoomRequest,
     CreateTeamFromRoomRequest,
 )
 from app.services.room_service import (
+    add_members_to_room_service,
     create_dm_room_service,
     create_team_room_service,
     create_team_from_existing_room_service,
@@ -40,6 +42,16 @@ def create_team_from_existing_room(
 ):
     current_user = auth["current_user"]
     return create_team_from_existing_room_service(room_id, current_user["user_uuid"], body)
+
+
+@router.post("/rooms/{room_id}/members")
+def add_members_to_room(
+    room_id: str,
+    body: AddRoomMembersRequest,
+    auth: dict = Depends(validate_room_member),
+):
+    current_user = auth["current_user"]
+    return add_members_to_room_service(room_id, current_user["user_uuid"], body)
 
 
 @router.get("/users/me/rooms")
