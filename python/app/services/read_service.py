@@ -20,23 +20,44 @@ def mark_room_as_read_service(room_id: str, user_uuid: str, last_read_message_id
     if not target_msg:
         raise HTTPException(status_code=404, detail="last_read_message_id에 해당하는 메시지가 없습니다.")
 
-    read_status_collection.update_one(
+    previous_doc = read_status_collection.find_one(
         {"room_id": room_id, "user_uuid": user_uuid},
-        {
-            "$set": {
-                "last_read_message_id": last_read_message_id,
-                "updated_at": now_iso()
-            }
-        },
-        upsert=True
+        {"_id": 0, "last_read_message_id": 1},
     )
+    previous_last_read_message_id = previous_doc.get("last_read_message_id") if previous_doc else None
+
+    previous_last_read_seq = 0
+    if previous_last_read_message_id:
+        previous_msg = messages_collection.find_one(
+            {"message_id": previous_last_read_message_id, "room_id": room_id},
+            {"_id": 0, "seq": 1},
+        )
+        if previous_msg:
+            previous_last_read_seq = int(previous_msg["seq"])
+
+    current_last_read_seq = int(target_msg["seq"])
+    is_changed = current_last_read_seq > previous_last_read_seq
+
+    if is_changed:
+        read_status_collection.update_one(
+            {"room_id": room_id, "user_uuid": user_uuid},
+            {
+                "$set": {
+                    "last_read_message_id": last_read_message_id,
+                    "updated_at": now_iso()
+                }
+            },
+            upsert=True
+        )
 
     return {
         "message": "읽음 상태가 업데이트되었습니다.",
         "room_id": room_id,
         "user_uuid": user_uuid,
         "last_read_message_id": last_read_message_id,
-        "last_read_seq": int(target_msg["seq"]),
+        "last_read_seq": current_last_read_seq,
+        "previous_last_read_seq": previous_last_read_seq,
+        "is_changed": is_changed,
     }
 
 

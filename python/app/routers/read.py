@@ -24,16 +24,18 @@ async def mark_room_as_read(
         body.last_read_message_id,
     )
 
-    await manager.broadcast(
-        room_id,
-        {
-            "type": "read_update",
-            "room_id": room_id,
-            "user_uuid": current_user["user_uuid"],
-            "last_read_message_id": result["last_read_message_id"],
-            "last_read_seq": result["last_read_seq"],
-        },
-    )
+    if result.get("is_changed"):
+        await manager.broadcast(
+            room_id,
+            {
+                "type": "read_update",
+                "room_id": room_id,
+                "user_uuid": current_user["user_uuid"],
+                "last_read_message_id": result["last_read_message_id"],
+                "last_read_seq": result["last_read_seq"],
+                "previous_last_read_seq": result.get("previous_last_read_seq", 0),
+            },
+        )
 
     return result
 
