@@ -62,32 +62,3 @@ def upsert_user(user_uuid: str, user_id: str, nickname: str, wallet_address: str
         {"$set": update_data},
         upsert=True,
     )
-
-
-def seed_users():
-    seed_data = [
-        {
-            "user_uuid": "550e8400-e29b-41d4-a716-446655440000",
-            "user_id": "john_doe",
-            "nickname": "John"
-        },
-        {
-            "user_uuid": "660e8400-e29b-41d4-a716-446655440111",
-            "user_id": "alice_01",
-            "nickname": "Alice"
-        },
-        {
-            "user_uuid": "770e8400-e29b-41d4-a716-446655440222",
-            "user_id": "bob_02",
-            "nickname": "Bob"
-        },
-        {
-            "user_uuid": "880e8400-e29b-41d4-a716-446655440333",
-            "user_id": "charlie_03",
-            "nickname": "Charlie"
-        }
-    ]
-
-    for user in seed_data:
-        if not users_collection.find_one({"user_uuid": user["user_uuid"]}):
-            users_collection.insert_one(user)
