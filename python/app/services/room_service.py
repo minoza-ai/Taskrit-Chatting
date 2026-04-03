@@ -248,6 +248,7 @@ def add_members_to_room_service(room_id: str, current_user_uuid: str, body):
 
     merged_members = get_room_member_uuids(room)
     added_count = 0
+    added_member_uuids: list[str] = []
 
     for member_identifier in body.new_members:
         resolved_uuid = resolve_user_uuid(member_identifier)
@@ -256,9 +257,12 @@ def add_members_to_room_service(room_id: str, current_user_uuid: str, body):
         if resolved_uuid not in merged_members:
             merged_members.append(resolved_uuid)
             added_count += 1
+            added_member_uuids.append(resolved_uuid)
 
     if added_count == 0:
-        return room
+        room_with_meta = dict(room)
+        room_with_meta["added_member_uuids"] = []
+        return room_with_meta
 
     update_doc = {
         "members": merged_members,
@@ -269,7 +273,9 @@ def add_members_to_room_service(room_id: str, current_user_uuid: str, body):
         update_doc["room_type"] = "team"
 
     rooms_collection.update_one({"room_id": room_id}, {"$set": update_doc})
-    return get_room(room_id)
+    updated_room = get_room(room_id)
+    updated_room["added_member_uuids"] = added_member_uuids
+    return updated_room
 
 
 def update_room_name_service(room_id: str, current_user_uuid: str, body):

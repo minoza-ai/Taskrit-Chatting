@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.dependencies import get_current_user, validate_room_member
+from app.websocket.manager import manager
 from app.schemas.room import (
     AddRoomMembersRequest,
     CreateDMRoomRequest,
@@ -47,13 +48,39 @@ def create_team_from_existing_room(
 
 
 @router.post("/rooms/{room_id}/members")
-def add_members_to_room(
+async def add_members_to_room(
     room_id: str,
     body: AddRoomMembersRequest,
     auth: dict = Depends(validate_room_member),
 ):
     current_user = auth["current_user"]
-    return add_members_to_room_service(room_id, current_user["user_uuid"], body)
+    result = add_members_to_room_service(room_id, current_user["user_uuid"], body)
+
+    # 방 멤버가 바뀌면 기존 메시지 unread_member_count 계산도 달라지므로
+    # 실시간 구독자들이 메시지/방 목록을 재동기화할 수 있도록 이벤트를 전파한다.
+    await manager.broadcast(
+        room_id,
+        {
+            "type": "room_members_updated",
+            "room_id": room_id,
+            "members": result.get("members", []),
+        },
+    )
+
+    for member_uuid in result.get("members", []):
+        if member_uuid == current_user["user_uuid"]:
+            continue
+        await manager.send_user_notification(
+            member_uuid,
+            {
+                "type": "notification",
+                "event": "room_members_updated",
+                "room_id": room_id,
+                "room_name": result.get("room_name") or "채팅방",
+            },
+        )
+
+    return result
 
 
 @router.patch("/rooms/{room_id}/name")
