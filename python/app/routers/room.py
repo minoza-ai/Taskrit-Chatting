@@ -14,6 +14,7 @@ from app.services.room_service import (
     create_dm_room_service,
     create_team_room_service,
     create_team_from_existing_room_service,
+    delete_room_image_service,
     list_user_rooms_service,
     update_room_image_service,
     update_room_name_service,
@@ -102,6 +103,39 @@ async def update_room_image(
 ):
     current_user = auth["current_user"]
     updated_room = await update_room_image_service(room_id, current_user["user_uuid"], image)
+
+    await manager.broadcast(
+        room_id,
+        {
+            "type": "room_members_updated",
+            "room_id": room_id,
+            "members": updated_room.get("members", []),
+        },
+    )
+
+    for member_uuid in updated_room.get("members", []):
+        if member_uuid == current_user["user_uuid"]:
+            continue
+        await manager.send_user_notification(
+            member_uuid,
+            {
+                "type": "notification",
+                "event": "room_members_updated",
+                "room_id": room_id,
+                "room_name": updated_room.get("room_name") or "채팅방",
+            },
+        )
+
+    return updated_room
+
+
+@router.delete("/rooms/{room_id}/image")
+async def delete_room_image(
+    room_id: str,
+    auth: dict = Depends(validate_room_member),
+):
+    current_user = auth["current_user"]
+    updated_room = delete_room_image_service(room_id, current_user["user_uuid"])
 
     await manager.broadcast(
         room_id,

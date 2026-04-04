@@ -357,20 +357,53 @@ async def update_room_image_service(room_id: str, current_user_uuid: str, file: 
     with open(file_path, "wb") as fp:
         fp.write(content)
 
-    previous_room_image_url = (room.get("room_image_url") or "").strip()
-    if previous_room_image_url.startswith("/files/"):
-        previous_saved_filename = os.path.basename(previous_room_image_url.removeprefix("/files/"))
-        previous_file_path = os.path.join(UPLOAD_DIR, previous_saved_filename)
-        if os.path.exists(previous_file_path):
-            try:
-                os.remove(previous_file_path)
-            except OSError:
-                pass
+    _remove_room_image_file(room.get("room_image_url"))
 
     next_room_image_url = f"/files/{saved_filename}"
     rooms_collection.update_one(
         {"room_id": room_id},
         {"$set": {"room_image_url": next_room_image_url}},
+    )
+
+    return get_room(room_id)
+
+
+def _remove_room_image_file(room_image_url: str | None):
+    normalized_image_url = (room_image_url or "").strip()
+    if not normalized_image_url.startswith("/files/"):
+        return
+
+    saved_filename = os.path.basename(normalized_image_url.removeprefix("/files/"))
+    if not saved_filename:
+        return
+
+    file_path = os.path.join(UPLOAD_DIR, saved_filename)
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+
+
+def delete_room_image_service(room_id: str, current_user_uuid: str):
+    room = get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
+
+    if not user_exists(current_user_uuid):
+        raise HTTPException(status_code=404, detail="현재 사용자가 존재하지 않습니다.")
+
+    if not is_room_member(room, current_user_uuid):
+        raise HTTPException(status_code=403, detail="채팅방 멤버만 사진을 삭제할 수 있습니다.")
+
+    if room.get("room_type") != "team":
+        raise HTTPException(status_code=400, detail="단체 채팅방만 사진 삭제가 가능합니다.")
+
+    _remove_room_image_file(room.get("room_image_url"))
+
+    rooms_collection.update_one(
+        {"room_id": room_id},
+        {"$set": {"room_image_url": None}},
     )
 
     return get_room(room_id)
