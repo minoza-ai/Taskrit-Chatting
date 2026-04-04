@@ -1,7 +1,10 @@
+import os
 import uuid
 from fastapi import HTTPException
+from fastapi import UploadFile
 
 from app.database import rooms_collection, messages_collection, read_status_collection
+from app.config import UPLOAD_DIR
 from app.services.user_service import user_exists, find_user_by_uuid, resolve_user_uuid, get_user_identifiers_by_uuid
 from app.utils.common import now_iso, make_dm_key
 from app.utils.serializers import serialize_doc
@@ -63,6 +66,7 @@ def create_dm_room_service(current_user_uuid: str, body):
         "room_id": str(uuid.uuid4()),
         "room_type": "dm",
         "room_name": body.room_name,
+        "room_image_url": None,
         "dm_key": dm_key,
         "members": [current_user_uuid, target_user_uuid],
         "created_at": now_iso(),
@@ -101,6 +105,7 @@ def create_team_room_service(current_user_uuid: str, body):
         "room_id": str(uuid.uuid4()),
         "room_type": "team",
         "room_name": body.room_name,
+        "room_image_url": None,
         "members": unique_members,
         "created_at": now_iso(),
         "created_by": current_user_uuid
@@ -225,6 +230,7 @@ def create_team_from_existing_room_service(room_id: str, current_user_uuid: str,
         "room_id": str(uuid.uuid4()),
         "room_type": "team",
         "room_name": body.room_name,
+        "room_image_url": None,
         "members": new_members,
         "created_at": now_iso(),
         "created_by": current_user_uuid,
@@ -300,6 +306,73 @@ def update_room_name_service(room_id: str, current_user_uuid: str, body):
         {"room_id": room_id},
         {"$set": {"room_name": next_name}},
     )
+    return get_room(room_id)
+
+
+async def update_room_image_service(room_id: str, current_user_uuid: str, file: UploadFile):
+    room = get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="채팅방이 없습니다.")
+
+    if not user_exists(current_user_uuid):
+        raise HTTPException(status_code=404, detail="현재 사용자가 존재하지 않습니다.")
+
+    if not is_room_member(room, current_user_uuid):
+        raise HTTPException(status_code=403, detail="채팅방 멤버만 사진을 변경할 수 있습니다.")
+
+    if room.get("room_type") != "team":
+        raise HTTPException(status_code=400, detail="단체 채팅방만 사진 변경이 가능합니다.")
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="파일 이름이 없습니다.")
+
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="이미지 파일만 업로드할 수 있습니다.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="빈 파일은 업로드할 수 없습니다.")
+
+    max_size = 5 * 1024 * 1024
+    if len(content) > max_size:
+        raise HTTPException(status_code=413, detail="이미지 크기는 5MB를 초과할 수 없습니다.")
+
+    extension_by_content_type = {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+    }
+
+    original_ext = os.path.splitext(file.filename)[1].lower()
+    extension = extension_by_content_type.get(content_type, original_ext or ".jpg")
+    if extension not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        extension = ".jpg"
+
+    saved_filename = f"room_{room_id}_{uuid.uuid4().hex}{extension}"
+    file_path = os.path.join(UPLOAD_DIR, saved_filename)
+
+    with open(file_path, "wb") as fp:
+        fp.write(content)
+
+    previous_room_image_url = (room.get("room_image_url") or "").strip()
+    if previous_room_image_url.startswith("/files/"):
+        previous_saved_filename = os.path.basename(previous_room_image_url.removeprefix("/files/"))
+        previous_file_path = os.path.join(UPLOAD_DIR, previous_saved_filename)
+        if os.path.exists(previous_file_path):
+            try:
+                os.remove(previous_file_path)
+            except OSError:
+                pass
+
+    next_room_image_url = f"/files/{saved_filename}"
+    rooms_collection.update_one(
+        {"room_id": room_id},
+        {"$set": {"room_image_url": next_room_image_url}},
+    )
+
     return get_room(room_id)
 
 
