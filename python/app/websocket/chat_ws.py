@@ -4,6 +4,7 @@ from pydantic import BaseModel, ValidationError
 from app.dependencies import fetch_current_user_by_token
 from app.services.room_service import get_room, get_dm_display_name_for_user, is_room_member, get_room_member_uuids
 from app.services.message_service import send_message_service, list_messages_service
+from app.services.user_service import find_user_by_uuid
 from app.websocket.manager import manager
 
 router = APIRouter(tags=["websocket"])
@@ -312,6 +313,12 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                     },
                 )
 
+                sender_profile_image = current_user.get("profile_image_url")
+                if not sender_profile_image:
+                    sender = find_user_by_uuid(user_uuid)
+                    if sender:
+                        sender_profile_image = sender.get("profile_image_url")
+
                 for member_uuid in get_room_member_uuids(room):
                     if member_uuid == user_uuid:
                         continue
@@ -323,11 +330,13 @@ async def websocket_chat(websocket: WebSocket, room_id: str):
                             "event": "new_message",
                             "room_id": room_id,
                             "room_name": get_dm_display_name_for_user(room, member_uuid),
+                            "room_type": room.get("room_type"),
+                            "room_image_url": room.get("room_image_url"),
                             "message": {
                                 "message_id": saved_message["message_id"],
                                 "text": saved_message["text"],
                                 "sender_uuid": user_uuid,
-                                "sender_profile_image": current_user.get("profile_image_url"),
+                                "sender_profile_image": sender_profile_image,
                                 "created_at": saved_message["created_at"],
                             },
                         },

@@ -40,6 +40,13 @@ async def send_message(
     )
 
     if room:
+        sender_profile_image = current_user.get("profile_image_url")
+        if not sender_profile_image:
+            from app.services.user_service import find_user_by_uuid
+            sender = find_user_by_uuid(current_user["user_uuid"])
+            if sender:
+                sender_profile_image = sender.get("profile_image_url")
+
         for member_uuid in get_room_member_uuids(room):
             if member_uuid == current_user["user_uuid"]:
                 continue
@@ -51,11 +58,13 @@ async def send_message(
                     "event": "new_message",
                     "room_id": room_id,
                     "room_name": get_dm_display_name_for_user(room, member_uuid),
+                    "room_type": room.get("room_type"),
+                    "room_image_url": room.get("room_image_url"),
                     "message": {
                         "message_id": saved_message["message_id"],
                         "text": saved_message["text"],
                         "sender_uuid": current_user["user_uuid"],
-                        "sender_profile_image": current_user.get("profile_image_url"),
+                        "sender_profile_image": sender_profile_image,
                         "created_at": saved_message["created_at"],
                     },
                 },
