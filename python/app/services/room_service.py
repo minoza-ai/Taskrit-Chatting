@@ -1,13 +1,103 @@
 import os
 import uuid
+from io import BytesIO
 from fastapi import HTTPException
 from fastapi import UploadFile
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.database import rooms_collection, messages_collection, read_status_collection
 from app.config import UPLOAD_DIR
 from app.services.user_service import user_exists, find_user_by_uuid, resolve_user_uuid, get_user_identifiers_by_uuid
 from app.utils.common import now_iso, make_dm_key
 from app.utils.serializers import serialize_doc
+
+
+MAX_ROOM_IMAGE_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024
+ROOM_IMAGE_TARGET_SIZE_BYTES = 900 * 1024
+ROOM_IMAGE_MAX_EDGE_PIXELS = 1024
+ROOM_IMAGE_START_QUALITY = 86
+ROOM_IMAGE_MIN_QUALITY = 50
+
+
+def _has_alpha_channel(image: Image.Image) -> bool:
+    if image.mode in {"RGBA", "LA"}:
+        return True
+    if image.mode == "P" and "transparency" in image.info:
+        return True
+    return False
+
+
+def _resolve_room_image_extension(content_type: str, original_ext: str) -> str:
+    extension_by_content_type = {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+    }
+
+    normalized_original_ext = original_ext.lower()
+    if normalized_original_ext == ".jpeg":
+        normalized_original_ext = ".jpg"
+
+    allowed_extensions = {".jpg", ".png", ".webp", ".gif"}
+    if normalized_original_ext in allowed_extensions:
+        return normalized_original_ext
+
+    mapped_ext = extension_by_content_type.get(content_type, ".jpg")
+    return mapped_ext if mapped_ext in allowed_extensions else ".jpg"
+
+
+def _encode_room_image(image: Image.Image, target_format: str, keep_alpha: bool) -> bytes:
+    working_image = image.convert("RGBA" if keep_alpha else "RGB")
+    last_bytes = b""
+
+    for quality in range(ROOM_IMAGE_START_QUALITY, ROOM_IMAGE_MIN_QUALITY - 1, -6):
+        output_buffer = BytesIO()
+        if target_format == "JPEG":
+            working_image.convert("RGB").save(
+                output_buffer,
+                format="JPEG",
+                quality=quality,
+                optimize=True,
+                progressive=True,
+            )
+        else:
+            working_image.save(
+                output_buffer,
+                format="WEBP",
+                quality=quality,
+                method=6,
+            )
+
+        candidate = output_buffer.getvalue()
+        last_bytes = candidate
+        if len(candidate) <= ROOM_IMAGE_TARGET_SIZE_BYTES:
+            return candidate
+
+    return last_bytes
+
+
+def _optimize_room_image_content(content: bytes, content_type: str, original_ext: str) -> tuple[bytes, str]:
+    try:
+        with Image.open(BytesIO(content)) as opened_image:
+            normalized_image = ImageOps.exif_transpose(opened_image)
+            normalized_image.thumbnail(
+                (ROOM_IMAGE_MAX_EDGE_PIXELS, ROOM_IMAGE_MAX_EDGE_PIXELS),
+                Image.Resampling.LANCZOS,
+            )
+
+            has_alpha = _has_alpha_channel(normalized_image)
+            target_format = "WEBP" if has_alpha else "JPEG"
+            target_ext = ".webp" if has_alpha else ".jpg"
+            optimized_content = _encode_room_image(normalized_image, target_format, has_alpha)
+
+            if len(optimized_content) < len(content):
+                return optimized_content, target_ext
+
+            return content, _resolve_room_image_extension(content_type, original_ext)
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=400, detail="지원하지 않는 이미지 형식입니다.") from exc
 
 
 def room_exists(room_id: str) -> bool:
@@ -334,28 +424,17 @@ async def update_room_image_service(room_id: str, current_user_uuid: str, file: 
     if not content:
         raise HTTPException(status_code=400, detail="빈 파일은 업로드할 수 없습니다.")
 
-    max_size = 5 * 1024 * 1024
-    if len(content) > max_size:
+    if len(content) > MAX_ROOM_IMAGE_UPLOAD_SIZE_BYTES:
         raise HTTPException(status_code=413, detail="이미지 크기는 5MB를 초과할 수 없습니다.")
 
-    extension_by_content_type = {
-        "image/jpeg": ".jpg",
-        "image/jpg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-        "image/gif": ".gif",
-    }
-
     original_ext = os.path.splitext(file.filename)[1].lower()
-    extension = extension_by_content_type.get(content_type, original_ext or ".jpg")
-    if extension not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-        extension = ".jpg"
+    optimized_content, extension = _optimize_room_image_content(content, content_type, original_ext)
 
     saved_filename = f"room_{room_id}_{uuid.uuid4().hex}{extension}"
     file_path = os.path.join(UPLOAD_DIR, saved_filename)
 
     with open(file_path, "wb") as fp:
-        fp.write(content)
+        fp.write(optimized_content)
 
     _remove_room_image_file(room.get("room_image_url"))
 
