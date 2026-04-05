@@ -1,3 +1,5 @@
+import re
+
 from app.database import users_collection
 from app.utils.serializers import serialize_doc
 
@@ -43,6 +45,30 @@ def get_user_identifiers_by_uuid(user_uuid: str) -> list[str]:
 
 def get_all_users():
     return list(users_collection.find({}, {"_id": 0}))
+
+
+def search_users(query: str, limit: int = 10):
+    normalized_query = (query or "").strip()
+    if not normalized_query:
+        return []
+
+    safe_query = re.escape(normalized_query)
+    regex = {"$regex": safe_query, "$options": "i"}
+    capped_limit = max(1, min(limit, 10))
+
+    return list(
+        users_collection
+        .find(
+            {
+                "$or": [
+                    {"nickname": regex},
+                    {"user_id": regex},
+                ]
+            },
+            {"_id": 0},
+        )
+        .limit(capped_limit)
+    )
 
 
 def upsert_user(user_uuid: str, user_id: str, nickname: str, wallet_address: str = None, profile_image_url: str = None):
